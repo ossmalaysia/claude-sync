@@ -34,7 +34,7 @@ jobs:
         run: go install github.com/wailsapp/wails/v2/cmd/wails@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)
       - name: Frontend tests
         working-directory: frontend
-        run: npm ci && npm test && npm run build
+        run: npm ci && npm test
       - name: Go tests
         run: go test ./...
       - name: Install NSIS
