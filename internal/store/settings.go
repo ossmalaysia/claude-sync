@@ -17,6 +17,18 @@ type Settings struct {
 	VerifiedAt    time.Time `json:"verified_at"`
 	VerifyOK      int       `json:"verify_ok"`
 	VerifyTotal   int       `json:"verify_total"`
+	VerifyWaiting int       `json:"verify_waiting"` // mismatches only because artifacts are not sent yet
+	// Memory last sent to the target, and a hash of the text sent, so the
+	// same memory is not imported twice.
+	MemorySentAt time.Time `json:"memory_sent_at"`
+	MemorySHA    string    `json:"memory_sha"`
+	// Last "Scan & sync": when, and what it found and sent.
+	LastSyncAt              time.Time `json:"last_sync_at"`
+	LastSyncNewProjects     int       `json:"last_sync_new_projects"`
+	LastSyncChangedProjects int       `json:"last_sync_changed_projects"`
+	LastSyncChats           int       `json:"last_sync_chats"`
+	LastSyncArtifacts       int       `json:"last_sync_artifacts"`
+	LastSyncSent            int       `json:"last_sync_sent"`
 }
 
 func (s *Store) LoadSettings() (Settings, error) {
@@ -54,7 +66,7 @@ func (s *Store) AcquireJob(kind string) (release func(), err error) {
 	if err := WriteFileAtomic(s.jobPath(), []byte(kind)); err != nil {
 		return nil, err
 	}
-	return func() { os.Remove(s.jobPath()) }, nil
+	return func() { _ = os.Remove(s.jobPath()) }, nil // best effort: a stale lock expires anyway
 }
 
 // RunningJob returns "pull", "push" or "" when no live job holds the lock.
@@ -73,5 +85,5 @@ func (s *Store) RunningJob() string {
 // TouchJob marks the running job as alive.
 func (s *Store) TouchJob() {
 	now := time.Now()
-	os.Chtimes(s.jobPath(), now, now)
+	_ = os.Chtimes(s.jobPath(), now, now) // best effort heartbeat
 }

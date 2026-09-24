@@ -25,6 +25,11 @@ type API interface {
 	DownloadPreview(ctx context.Context, org, fileUUID string) ([]byte, error)
 	UploadFile(ctx context.Context, org, project, fileName, mime string, data []byte) (claudeapi.File, error)
 	GetMemory(ctx context.Context, org string) (string, error)
+	ListChats(ctx context.Context, org string, offset, limit int) ([]claudeapi.Chat, bool, error)
+	GetChat(ctx context.Context, org, chat string) (claudeapi.ChatDetail, error)
+	ListSkills(ctx context.Context, org string) ([]claudeapi.Skill, error)
+	DownloadSkill(ctx context.Context, org, skillID string) ([]byte, error)
+	UploadSkill(ctx context.Context, org, fileName string, data []byte) error
 }
 
 var (

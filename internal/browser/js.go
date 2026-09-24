@@ -32,8 +32,10 @@ func jsDownload(url string) string {
 		jsString(url))
 }
 
-// jsUpload posts multipart field "file", as the claude.ai web app does.
-func jsUpload(url, fileName, mime, b64 string) string {
-	return fmt.Sprintf(`(async()=>{`+hostGuard+`const bin=atob(%s);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++){bytes[i]=bin.charCodeAt(i);}const fd=new FormData();fd.append("file",new Blob([bytes],{type:%s}),%s);const r=await fetch(%s,{method:"POST",body:fd,credentials:"include"});return {status:r.status,body:await r.text()}})()`,
-		jsString(b64), jsString(mime), jsString(fileName), jsString(url))
+// jsUpload posts multipart field "file", plus any extra text fields, as the
+// claude.ai web app does.
+func jsUpload(url, fileName, mime, b64 string, fields map[string]string) string {
+	extra, _ := json.Marshal(fields) // null when fields is nil
+	return fmt.Sprintf(`(async()=>{`+hostGuard+`const bin=atob(%s);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++){bytes[i]=bin.charCodeAt(i);}const fd=new FormData();fd.append("file",new Blob([bytes],{type:%s}),%s);const extra=%s||{};for(const k of Object.keys(extra)){fd.append(k,extra[k]);}const r=await fetch(%s,{method:"POST",body:fd,credentials:"include"});return {status:r.status,body:await r.text()}})()`,
+		jsString(b64), jsString(mime), jsString(fileName), string(extra), jsString(url))
 }

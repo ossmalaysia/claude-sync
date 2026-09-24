@@ -10,6 +10,10 @@
 </p>
 
 <p align="center">
+  <img src="docs/images/done.png" width="560" alt="Claude Sync after a migration: every step checked" />
+</p>
+
+<p align="center">
   <a href="https://github.com/ossmalaysia/claude-sync/actions/workflows/build.yml"><img src="https://github.com/ossmalaysia/claude-sync/actions/workflows/build.yml/badge.svg" alt="build" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license" /></a>
 </p>
@@ -24,7 +28,12 @@ export leaves out knowledge-file contents. Claude Sync copies them for you:
 - Project instructions
 - Text knowledge docs, with their full content
 - Uploaded knowledge files, byte for byte (images: see [limitations](#limitations))
-- Account memory, exported as `memory.md` for you to paste into the new account
+- **Artifacts from your chats** (and files Claude wrote), at their final version:
+  added as docs to the matching Project, and saved as readable files locally
+- **Your own skills**, with every file they contain (built-in Anthropic skills
+  are not copied)
+- **Memory**, sent through claude.ai's memory import
+- **Keeps up**: *Scan & sync changes* sends only what is new since last time
 
 > [!IMPORTANT]
 > Claude Sync is an independent open-source project. It is **not affiliated
@@ -50,7 +59,8 @@ Pull and push can be stopped at any time and resumed later. Progress is saved
 after every step, so a resumed push never creates duplicates. The home screen
 always shows the real state, even after a restart.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
+**New here? Follow the [user guide](docs/USER_GUIDE.md)**, which has screenshots
+of each step. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
 
 ## Install
 
@@ -86,9 +96,13 @@ once.
 
 ## Limitations
 
-- **Chats are not migrated.** claude.ai cannot recreate conversations.
-- **Memory cannot be written automatically.** Copy `memory.md` from the app and
-  paste it into the target account under Settings, Memory.
+- **Chats are not migrated.** claude.ai cannot recreate conversations. Their
+  artifacts are recovered instead: those from Project chats are added to the
+  matching Project; all of them are saved under `artifacts-export/` locally.
+- Files that Claude produced by running code (for example a generated `.docx`
+  or `.pptx`) and published artifact pages are not recovered.
+- **Memory** is merged by claude.ai into the target's memory; it is sent once per
+  change so it is not imported twice.
 - **Images** have no downloadable original on claude.ai. The full-resolution
   preview is saved and uploaded as `<name>.webp` instead.
 - Files larger than 30 MB are skipped and reported.

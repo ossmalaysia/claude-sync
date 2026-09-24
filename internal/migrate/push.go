@@ -14,6 +14,9 @@ type PushResult struct {
 	Instructions    int       `json:"instructions"`
 	Docs            int       `json:"docs"`
 	Files           int       `json:"files"`
+	Artifacts       int       `json:"artifacts"`
+	Touched         []string  `json:"touched"` // source projects that received any write
+	Skills          int       `json:"skills"`  // skills uploaded
 	Failed          []Failure `json:"failed"`
 }
 
@@ -27,6 +30,9 @@ type pushRun struct {
 	report  Reporter
 	res     *PushResult
 	project string // name of the project being pushed, for messages
+	current string // uuid of the project being pushed
+	touched map[string]bool
+	arts    map[string][]artifactRef
 }
 
 // Push creates the selected projects in the target org. It only ever
@@ -49,15 +55,21 @@ func Push(ctx context.Context, api API, st *store.Store, state *store.State, org
 	}
 	state.TargetOrg = org
 	r := &pushRun{ctx: ctx, api: api, st: st, state: state, org: org, opts: opts, report: report, res: &res}
+	if r.arts, err = artifactsByProject(st); err != nil {
+		return res, err
+	}
 	if err := r.save(); err != nil {
 		return res, err
 	}
 	for i, p := range projects {
 		report.emit(Event{Stage: "push", Done: i, Total: len(projects), Level: "info", Message: p.Name})
-		r.project = p.Name
+		r.project, r.current = p.Name, p.UUID
 		if err := r.pushProject(p); err != nil {
 			return res, err
 		}
+	}
+	if err := r.pushSkills(); err != nil {
+		return res, err
 	}
 	report.emit(Event{Stage: "push", Done: len(projects), Total: len(projects), Level: "info", Message: "push complete"})
 	return res, nil
@@ -97,6 +109,9 @@ func (r *pushRun) pushProject(p store.ProjectMeta) error {
 		}
 		ps.Target, ps.Status, ps.Error = created.UUID, "", ""
 		r.res.CreatedProjects++
+		if err := r.touch(); err != nil {
+			return err
+		}
 		if err := r.save(); err != nil {
 			return err
 		}
@@ -187,6 +202,29 @@ func (r *pushRun) pushProject(p store.ProjectMeta) error {
 			r.res.Files++
 		}
 	}
+
+	// Artifacts from this project's chats become docs in the target project.
+	for _, a := range r.arts[p.UUID] {
+		it := ps.Artifacts[a.key()]
+		if it != nil && it.Status == store.StatusDone {
+			continue
+		}
+		if it == nil {
+			it = &store.ItemState{}
+			ps.Artifacts[a.key()] = it
+		}
+		a := a
+		err := r.item("artifact "+a.FileName, it, contentSHA(a.Content), func() (string, error) {
+			doc, err := r.api.CreateDoc(r.ctx, r.org, ps.Target, a.FileName, a.Content)
+			return doc.UUID, err
+		})
+		if err != nil {
+			return err
+		}
+		if it.Status == store.StatusDone {
+			r.res.Artifacts++
+		}
+	}
 	return nil
 }
 
@@ -207,5 +245,22 @@ func (r *pushRun) item(label string, it *store.ItemState, sha string, write func
 	if err := r.save(); err != nil {
 		return err
 	}
+	if err := r.touch(); err != nil {
+		return err
+	}
 	return r.opts.Sleep(r.ctx, r.opts.WritePause)
+}
+
+// touch records that the current project changed in the target, and drops
+// its last check so it is not shown as verified.
+func (r *pushRun) touch() error {
+	if r.touched == nil {
+		r.touched = map[string]bool{}
+	}
+	if r.touched[r.current] {
+		return nil
+	}
+	r.touched[r.current] = true
+	r.res.Touched = append(r.res.Touched, r.current)
+	return r.st.ForgetVerify(r.current)
 }

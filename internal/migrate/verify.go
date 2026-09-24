@@ -3,6 +3,8 @@ package migrate
 import (
 	"context"
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/ossmalaysia/claude-sync/internal/claudeapi"
 	"github.com/ossmalaysia/claude-sync/internal/store"
@@ -17,6 +19,7 @@ type VerifyRow struct {
 	WantFiles  int    `json:"want_files"`
 	GotFiles   int    `json:"got_files"`
 	OK         bool   `json:"ok"`
+	Waiting    int    `json:"waiting"` // artifacts not sent yet; the only difference when set
 	Error      string `json:"error"`
 }
 
@@ -43,7 +46,9 @@ func expected(st *store.Store, p string, opts Options) (docs, files int, err err
 // Verify compares every selected (or already pushed) project's target
 // docs_count and files_count with the local copy. A selected project that
 // has no target is reported as a failed row, never skipped.
-func Verify(ctx context.Context, api API, st *store.Store, state *store.State, org string, opts Options) ([]VerifyRow, error) {
+// Verify checks the selected projects (or, when only is non-nil, just those
+// source projects) in the target, and records each result in verify.json.
+func Verify(ctx context.Context, api API, st *store.Store, state *store.State, org string, opts Options, report Reporter, only map[string]bool) ([]VerifyRow, error) {
 	if state.TargetOrg != "" && state.TargetOrg != org {
 		return nil, ErrOrgMismatch
 	}
@@ -56,16 +61,25 @@ func Verify(ctx context.Context, api API, st *store.Store, state *store.State, o
 		return nil, err
 	}
 	var rows []VerifyRow
+	arts, err := artifactsByProject(st)
+	if err != nil {
+		return nil, err
+	}
+	var check []store.ProjectMeta
 	for _, p := range projects {
+		if sel[p.UUID] && (only == nil || only[p.UUID]) {
+			check = append(check, p)
+		}
+	}
+	for i, p := range check {
+		report.emit(Event{Stage: "verify", Done: i, Total: len(check), Level: "info", Message: p.Name})
 		ps := state.Projects[p.UUID]
 		pushed := ps != nil && ps.Target != ""
-		if !sel[p.UUID] && !pushed {
-			continue
-		}
 		row := VerifyRow{SourceUUID: p.UUID, Name: p.Name}
 		if row.WantDocs, row.WantFiles, err = expected(st, p.UUID, opts); err != nil {
 			return rows, err
 		}
+		row.WantDocs += len(arts[p.UUID]) // artifacts are added as docs
 		if !pushed {
 			row.Error = "project not created in target"
 			if ps != nil && ps.Error != "" {
@@ -87,8 +101,40 @@ func Verify(ctx context.Context, api API, st *store.Store, state *store.State, o
 		default:
 			row.GotDocs, row.GotFiles = got.DocsCount, got.FilesCount
 			row.OK = row.GotDocs == row.WantDocs && row.GotFiles == row.WantFiles
+			// If the only difference is artifacts not sent yet, say so.
+			unsent := len(arts[p.UUID]) - countDone(ps.Artifacts)
+			if !row.OK && unsent > 0 && row.GotDocs == row.WantDocs-unsent && row.GotFiles == row.WantFiles {
+				row.Waiting = unsent
+				row.Error = fmt.Sprintf("%d artifacts not sent yet", unsent)
+				if unsent == 1 {
+					row.Error = "1 artifact not sent yet"
+				}
+			}
 		}
 		rows = append(rows, row)
 	}
-	return rows, nil
+	report.emit(Event{Stage: "verify", Done: len(check), Total: len(check), Level: "info", Message: "verify complete"})
+	return rows, st.RecordVerify(VerifyRows(rows).toResults())
+}
+
+type VerifyRows []VerifyRow
+
+// toResults turns rows into per-project results stamped with the time now.
+func (rows VerifyRows) toResults() map[string]store.VerifyResult {
+	now := time.Now().UTC()
+	out := make(map[string]store.VerifyResult, len(rows))
+	for _, r := range rows {
+		out[r.SourceUUID] = store.VerifyResult{OK: r.OK, Waiting: r.Waiting, Error: r.Error, CheckedAt: now}
+	}
+	return out
+}
+
+func countDone(m map[string]*store.ItemState) int {
+	n := 0
+	for _, it := range m {
+		if it.Status == store.StatusDone {
+			n++
+		}
+	}
+	return n
 }

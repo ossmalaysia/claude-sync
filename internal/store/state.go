@@ -33,12 +33,14 @@ type ProjectState struct {
 	Instructions *ItemState            `json:"instructions,omitempty"`
 	Docs         map[string]*ItemState `json:"docs"`
 	Files        map[string]*ItemState `json:"files"`
+	Artifacts    map[string]*ItemState `json:"artifacts,omitempty"` // key "<chat uuid>/<artifact id>"
 }
 
 // State is push progress keyed by SOURCE uuids.
 type State struct {
 	TargetOrg string                   `json:"target_org"`
 	Projects  map[string]*ProjectState `json:"projects"`
+	Skills    map[string]*ItemState    `json:"skills,omitempty"` // by source skill id
 }
 
 // Project returns the entry for a source project, creating it if needed.
@@ -56,6 +58,9 @@ func (s *State) Project(src string) *ProjectState {
 	}
 	if ps.Files == nil {
 		ps.Files = map[string]*ItemState{}
+	}
+	if ps.Artifacts == nil {
+		ps.Artifacts = map[string]*ItemState{}
 	}
 	return ps
 }

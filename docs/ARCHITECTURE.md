@@ -26,11 +26,16 @@ source account ──pull──▶ local folder ──push──▶ target accou
 
 1. **Pull** reads every Project of the source org: details, instructions, text
    docs, and uploaded files. Files already downloaded are skipped, so a stopped
-   pull resumes.
+   pull resumes. Pull then reads every chat, follows the branch on screen
+   (edited or retried messages leave abandoned branches), and rebuilds the
+   final version of each artifact (replaying create, update and rewrite) and
+   of each file Claude wrote (create_file or Write, then str_replace or Edit).
+   Unchanged chats are skipped on the next pull.
 2. **Select** chooses which Projects to send. Names starting with `Personal:`,
    `Family:` or `Travel` start unticked.
 3. **Push** creates each selected Project in the target org, then its
-   instructions, docs and files. Progress is saved after every write, so a
+   instructions, docs, files, and the artifacts from that Project's chats
+   (as docs named `Artifact - <title>`). Progress is saved after every write, so a
    stopped push resumes exactly where it stopped and never creates duplicates.
 4. **Verify** compares the target's doc and file counts with the local copy.
 
@@ -58,6 +63,9 @@ profiles/source, profiles/target   browser profiles (saved logins)
 migration/
   manifest.json    pull progress: total, complete, counts
   projects/<id>/   project.json, docs/<id>.json, files/<id>.bin + .json
+  chats/<id>.json  artifacts recovered from each chat, with its updated_at
+  skills/<id>.skill + .json   personal skills (zip with every file) and metadata
+  artifacts-export/<project>/<chat>/   readable copies of every artifact
   memory.md        account memory, for pasting into the target by hand
   selection.json   which projects to send
   state.json       push progress, keyed by source ids
@@ -81,14 +89,24 @@ All paths are relative to `https://claude.ai`. `{org}` is an organization uuid.
 | Download image preview | `GET /api/{org}/files/{file}/preview` |
 | Upload file | `POST /api/organizations/{org}/projects/{id}/upload` (multipart) |
 | Account memory | `GET /api/organizations/{org}/memory` |
+| List skills | `GET /api/organizations/{org}/skills/list-skills` |
+| Download a skill (zip with every file) | `GET /api/organizations/{org}/skills/download-dot-skill-file?skill_id=&include_blocked=true` |
+| Upload a skill | `POST /api/organizations/{org}/skills/upload-skill?overwrite=false&upload_source=customize_upload` (multipart) |
+| Import memory | `POST /api/organizations/{org}/melange/import_external` `{"raw_export": ...}` |
+| List chats | `GET /api/organizations/{org}/chat_conversations_v2?limit=&offset=` |
+| Get a chat with all messages | `GET /api/organizations/{org}/chat_conversations/{id}?tree=True&rendering_mode=messages&render_all_tools=true` |
 
 These endpoints are undocumented and can change without notice.
 
 ## Limitations
 
-- **Chats** are not migrated: claude.ai cannot recreate conversations.
-- **Memory** can be read but not written; paste `memory.md` into the target
-  account under Settings, Memory.
+- **Chats** are not migrated: claude.ai cannot recreate conversations. Their
+  artifacts are recovered as described above; code-generated binary files and
+  published artifact pages are not.
+- **Memory** is sent through claude.ai's memory import, which merges it into
+  the target's memory; the same text is never sent twice.
+- **Skills**: only personal skills are copied (built-in Anthropic skills are
+  skipped); uploads never overwrite a skill of the same name in the target.
 - **Images** have no downloadable original; the full-resolution preview is
   saved and uploaded as WebP.
 - Files over 30 MB are skipped and reported.

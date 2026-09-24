@@ -10,5 +10,6 @@ import "context"
 type Doer interface {
 	JSON(ctx context.Context, method, path string, body any) (status int, resp []byte, err error)
 	Download(ctx context.Context, path string) (status int, data []byte, err error)
-	Upload(ctx context.Context, path, fileName, mime string, data []byte) (status int, resp []byte, err error)
+	// Upload posts multipart form field "file" plus any extra text fields.
+	Upload(ctx context.Context, path, fileName, mime string, data []byte, fields map[string]string) (status int, resp []byte, err error)
 }

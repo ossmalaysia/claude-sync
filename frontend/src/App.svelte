@@ -1,11 +1,11 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
   import * as Go from '../wailsjs/go/app/App.js';
-  import { BrowserOpenURL, ClipboardSetText, EventsOn } from '../wailsjs/runtime/runtime.js';
+  import { ClipboardSetText, EventsOn } from '../wailsjs/runtime/runtime.js';
   import Select from './views/Select.svelte';
   import logo from './assets/logo.png';
   import { pullProgressText } from './lib/format.js';
-  import { nextButton, progress, pullLine, pushLine, verifyLine } from './lib/status.js';
+  import { artifactLine, lastSyncLine, memoryLine, nextButton, selectionLine, skillLine, progress, pullLine, pushLine, verifyLine } from './lib/status.js';
 
   // Everything shown comes from Status(), which the backend rebuilds from the
   // files on disk every poll. Nothing here depends on what was clicked before.
@@ -30,15 +30,24 @@
     }
   }
 
+  let version = $state('');
+
+  function openLink(name) {
+    Go.OpenLink(name).catch((e) => (error = String(e)));
+  }
+
   onMount(() => {
     refresh();
+    Go.Version().then((v) => (version = v)).catch(() => {});
     const timer = setInterval(refresh, 3000);
     return () => clearInterval(timer);
   });
 
   const off = EventsOn('progress', (e) => {
-    if (e.level === 'info') live = e.stage === 'pull' ? pullProgressText(e) : `${e.done} of ${e.total} projects, now ${e.message}`;
-    else log = [...log.slice(-200), e.message];
+    if (e.level !== 'info') log = [...log.slice(-200), e.message];
+    else if (e.stage === 'pull') live = pullProgressText(e);
+    else if (e.stage === 'verify') live = e.done < e.total ? `Checking ${e.done + 1} of ${e.total}: ${e.message}` : '';
+    else live = `${e.done} of ${e.total} projects, now ${e.message}`;
   });
   onDestroy(off);
 
@@ -69,8 +78,31 @@
     connect_target: () => run('connect_target', async () => (orgs.target = await Go.ConnectAccount('target'))),
     pull: () => run('pull', async () => outcome('Pull', await Go.Pull(''))),
     push: () => run('push', async () => outcome('Push', await Go.Push(''))),
-    verify: () => run('verify', async () => (verifyRows = await Go.Verify(''))),
+    verify: () =>
+      run('verify', async () => {
+        verifyRows = await Go.Verify('');
+        // Bring the results into view; they sit below the step list.
+        setTimeout(() => document.getElementById('verify-results')?.scrollIntoView({ behavior: 'smooth' }), 50);
+      }),
     select: () => (view = 'select'),
+    sync: () =>
+      run('sync', async () => {
+        const out = await Go.SyncChanges();
+        const where = { pull: 'while scanning the source', push: 'while sending', memory: 'while sending memory' }[out.stage] || '';
+        if (out.status === 'completed') notice = 'Sync finished. ' + (lastSyncLine(await Go.Status()) || '');
+        else if (out.status === 'paused') notice = `Sync stopped ${where}. Everything done so far is saved; press Scan & sync to continue.`;
+        else notice = `A login expired or a browser window was closed ${where}. Press Scan & sync and log in to the window that opens.`;
+      }),
+    memory: () =>
+      run('memory', async () => {
+        const out = await Go.SyncMemory();
+        notice = {
+          sent: 'Memory sent. claude.ai is adding it to the target account’s memory; it appears there within a few minutes.',
+          unchanged: 'Memory was already sent and has not changed.',
+          empty: 'There is no memory to send. Pull first.',
+          needs_login: 'The target login expired or its window was closed. Press Send again and log in to the window that opens.',
+        }[out.status];
+      }),
   };
 
   async function chooseOrg(account, uuid) {
@@ -79,6 +111,9 @@
     orgs[account] = null;
     await refresh();
   }
+
+  // Opens the local artifacts-export folder in Finder or Explorer.
+  const openExport = () => Go.OpenArtifactsFolder().catch((e) => (error = String(e)));
 
   async function toggleMemory() {
     showMemory = !showMemory;
@@ -96,12 +131,13 @@
   const rowState = $derived.by(() => {
     if (!status) return {};
     const s = status;
-    const pushDone = s.pushed > 0 && s.pending_projects + s.pending_items + s.failed === 0;
+    const pushDone = s.pushed > 0 && s.pending_projects + s.pending_items + s.failed - (s.skills_failed || 0) === 0;
     return {
       pull: s.pull_complete ? 'done' : s.pull_done || s.job === 'pull' ? 'active' : 'todo',
       select: s.selected > 0 ? 'done' : 'todo',
       push: pushDone ? 'done' : s.pushed || s.job === 'push' ? 'active' : 'todo',
       verify: s.verified_at && !s.verify_stale && s.verify_ok === s.verify_total ? 'done' : 'todo',
+      artifacts: !s.artifacts ? 'todo' : s.artifacts_pending ? (s.artifacts_sent ? 'active' : 'todo') : 'done',
     };
   });
 </script>
@@ -123,7 +159,7 @@
         <div class="account">
           <span class="role">From</span>
           <strong title={orgLabel(status.source)}>{orgLabel(status.source)}</strong>
-          <span class="login">{status.source.saved_login ? 'Saved login' : 'Not logged in'}</span>
+          <span class="login">{status.source.saved_login ? 'Signed in before' : 'Not signed in yet'}</span>
           <button class="link" onclick={actions.connect_source} disabled={locked}>{status.source.org ? 'Change' : 'Connect'}</button>
           {#if orgs.source}
             <select value={status.source.org} onchange={(e) => chooseOrg('source', e.currentTarget.value)}>
@@ -140,7 +176,7 @@
         <div class="account">
           <span class="role">To</span>
           <strong title={orgLabel(status.target)}>{orgLabel(status.target)}</strong>
-          <span class="login">{status.target.saved_login ? 'Saved login' : 'Not logged in'}</span>
+          <span class="login">{status.target.saved_login ? 'Signed in before' : 'Not signed in yet'}</span>
           <button class="link" onclick={actions.connect_target} disabled={locked}>{status.target.org ? 'Change' : 'Connect'}</button>
           {#if orgs.target}
             <select value={status.target.org} onchange={(e) => chooseOrg('target', e.currentTarget.value)}>
@@ -159,10 +195,14 @@
           <span class="muted">Running from the command line. This screen updates every few seconds.</span>
         {:else if btn.action}
           <button class="primary" onclick={actions[btn.action]} disabled={!!busy}>{busy ? 'Working…' : btn.label}</button>
+          {#if btn.action !== 'sync' && status.pull_complete && status.target.org}
+            <button onclick={actions.sync} disabled={!!busy}>Scan & sync changes</button>
+          {/if}
         {:else}
           <span class="verified">{btn.label}</span>
         {/if}
       </div>
+      {#if lastSyncLine(status) && !status.job}<p class="muted small">{lastSyncLine(status)}</p>{/if}
       {#if status.job_here}<p class="muted small">Stopping is safe. Everything done so far is saved and Resume continues from there.</p>{/if}
       {#if live}<p class="muted small">{live}</p>{/if}
       {#if error}<p class="error">{error}</p>{/if}
@@ -172,12 +212,17 @@
       <ol class="steps">
         <li class={rowState.pull}>
           <span class="mark" aria-hidden="true"></span>
-          <div><b>Download from source</b><span>{pullLine(status)}</span></div>
+          <div>
+            <b>Download from source</b><span>{pullLine(status)}</span>
+            {#if status.job === 'pull' && status.phase_total}
+              <progress class="bar" max={status.phase_total} value={status.phase_done}></progress>
+            {/if}
+          </div>
           <button onclick={actions.pull} disabled={locked || !status.source.org}>{status.pull_complete ? 'Pull again' : status.pull_done ? 'Resume' : 'Start'}</button>
         </li>
         <li class={rowState.select}>
           <span class="mark" aria-hidden="true"></span>
-          <div><b>Choose projects</b><span>{status.selected} of {status.projects} projects selected</span></div>
+          <div><b>Choose projects</b><span>{selectionLine(status)}</span></div>
           <button onclick={actions.select} disabled={locked || !status.projects}>Edit</button>
         </li>
         <li class={rowState.push}>
@@ -188,15 +233,28 @@
           </div>
           <button onclick={actions.push} disabled={locked || !status.target.org || !status.pull_complete || rowState.push === 'done'}>{rowState.push === 'done' ? 'Sent' : status.failed && !status.pending_projects && !status.pending_items ? 'Retry' : status.pushed ? 'Resume' : 'Start'}</button>
         </li>
+        <li class={rowState.artifacts}>
+          <span class="mark" aria-hidden="true"></span>
+          <div><b>Artifacts from chats</b><span>{artifactLine(status)}</span></div>
+          <button onclick={openExport} disabled={!status.artifacts}>Open folder</button>
+        </li>
+        <li class={!status.skills ? 'todo' : status.skills_pending || status.skills_failed ? 'active' : 'done'}>
+          <span class="mark" aria-hidden="true"></span>
+          <div><b>Skills</b><span>{skillLine(status)}</span></div>
+          <span></span>
+        </li>
         <li class={rowState.verify}>
           <span class="mark" aria-hidden="true"></span>
           <div><b>Check the target</b><span>{verifyLine(status)}</span></div>
           <button onclick={actions.verify} disabled={locked || !status.pushed}>Verify</button>
         </li>
-        <li class="todo">
+        <li class={status.memory_sent_at && !status.memory_pending ? 'done' : 'todo'}>
           <span class="mark" aria-hidden="true"></span>
-          <div><b>Copy memory</b><span>Paste it into the target account under Settings, Memory.</span></div>
-          <button onclick={toggleMemory} disabled={!status.pull_complete}>{showMemory ? 'Hide' : 'Show'}</button>
+          <div><b>Memory</b><span>{memoryLine(status)}</span></div>
+          <div class="actions">
+            <button onclick={toggleMemory} disabled={!status.pull_complete && !status.memory_sent_at}>{showMemory ? 'Hide' : 'Show'}</button>
+            <button onclick={actions.memory} disabled={locked || !status.memory_pending || !status.target.org}>{status.memory_sent_at && status.memory_pending ? 'Send again' : 'Send'}</button>
+          </div>
         </li>
       </ol>
 
@@ -208,14 +266,14 @@
       {/if}
 
       {#if verifyRows.length}
-        <div class="panel">
-          <p><b>{verifyRows.length - bad.length} of {verifyRows.length} projects match the target.</b></p>
+        <div class="panel" id="verify-results">
+          <p><b>{verifyLine(status)}</b></p>
           {#if bad.length}
             <table>
-              <thead><tr><th>Project</th><th>Docs</th><th>Files</th><th>Problem</th></tr></thead>
+              <thead><tr><th>Project</th><th>Docs</th><th>Files</th><th>Reason</th></tr></thead>
               <tbody>
                 {#each bad as r}
-                  <tr><td>{r.name}</td><td>{r.got_docs} of {r.want_docs}</td><td>{r.got_files} of {r.want_files}</td><td class="error">{r.error}</td></tr>
+                  <tr><td>{r.name}</td><td>{r.got_docs} of {r.want_docs}</td><td>{r.got_files} of {r.want_files}</td><td class={r.waiting ? 'muted' : 'error'}>{r.error}</td></tr>
                 {/each}
               </tbody>
             </table>
@@ -230,6 +288,9 @@
   </main>
 
   <footer>
-    Developed by <button class="link" onclick={() => BrowserOpenURL('https://www.anchorsprint.com/')}>Anchor Sprint</button>
+    Developed by <button class="link" onclick={() => openLink('website')}>Anchor Sprint</button>
+    <span class="sep" aria-hidden="true"></span>
+    <button class="link" onclick={() => openLink('issues')}>Report an issue</button>
+    {#if version}<span class="sep" aria-hidden="true"></span><span class="version" title="Include this when you report an issue">{version}</span>{/if}
   </footer>
 </div>

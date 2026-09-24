@@ -21,11 +21,16 @@ type fakeAPI struct {
 	files    map[string][]claudeapi.File
 	blobs    map[string][]byte
 	previews map[string][]byte // file uuid -> preview (WebP) bytes
+	chats    []claudeapi.ChatDetail
+	skills   []claudeapi.Skill
+	skillPkg map[string][]byte // skill id -> package
 	memory   string
 	email    string
 	failures map[string][]error // op -> results for successive calls (nil = succeed)
-	calls    []string           // "Op:detail"
-	seq      int
+	// lostReply: the next UploadSkill takes effect but its reply is lost.
+	lostReply error
+	calls     []string // "Op:detail"
+	seq       int
 }
 
 func newFakeAPI() *fakeAPI {
@@ -34,6 +39,7 @@ func newFakeAPI() *fakeAPI {
 		files:    map[string][]claudeapi.File{},
 		blobs:    map[string][]byte{},
 		previews: map[string][]byte{},
+		skillPkg: map[string][]byte{},
 		failures: map[string][]error{},
 	}
 }
@@ -117,7 +123,8 @@ func (f *fakeAPI) ListProjects(_ context.Context, org string) ([]claudeapi.Proje
 	}
 	out := make([]claudeapi.Project, len(f.projects))
 	for i, p := range f.projects {
-		p.PromptTemplate = "" // the real listing omits instructions; pull must call GetProject
+		p.PromptTemplate = ""                                                 // the real listing omits instructions; pull must call GetProject
+		p.DocsCount, p.FilesCount = len(f.docs[p.UUID]), len(f.files[p.UUID]) // the real listing has counts
 		out[i] = p
 	}
 	return out, nil
@@ -252,4 +259,90 @@ func (f *fakeAPI) DownloadPreview(_ context.Context, _, fileUUID string) ([]byte
 		return nil, notFound()
 	}
 	return append([]byte(nil), b...), nil
+}
+
+// addChat seeds a chat whose messages form a single branch.
+func (f *fakeAPI) addChat(name, project, updatedAt string, msgs ...claudeapi.ChatMessage) claudeapi.ChatDetail {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c := claudeapi.ChatDetail{Chat: claudeapi.Chat{UUID: f.newID("c"), Name: name, ProjectUUID: project, UpdatedAt: updatedAt}, Messages: msgs}
+	if len(msgs) > 0 {
+		c.CurrentLeaf = msgs[len(msgs)-1].UUID
+	}
+	f.chats = append(f.chats, c)
+	return c
+}
+
+func (f *fakeAPI) ListChats(_ context.Context, org string, offset, limit int) ([]claudeapi.Chat, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("ListChats", fmt.Sprint(offset)); err != nil {
+		return nil, false, err
+	}
+	var out []claudeapi.Chat
+	for i := offset; i < len(f.chats) && i < offset+limit; i++ {
+		out = append(out, f.chats[i].Chat)
+	}
+	return out, offset+limit < len(f.chats), nil
+}
+
+func (f *fakeAPI) GetChat(_ context.Context, _, id string) (claudeapi.ChatDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("GetChat", id); err != nil {
+		return claudeapi.ChatDetail{}, err
+	}
+	for _, c := range f.chats {
+		if c.UUID == id {
+			return c, nil
+		}
+	}
+	return claudeapi.ChatDetail{}, notFound()
+}
+
+func (f *fakeAPI) addSkill(name, source, creator, updatedAt string, pkg []byte) claudeapi.Skill {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sk := claudeapi.Skill{ID: f.newID("skill"), Name: name, Source: source, CreatorType: creator, UpdatedAt: updatedAt}
+	f.skills = append(f.skills, sk)
+	f.skillPkg[sk.ID] = pkg
+	return sk
+}
+
+func (f *fakeAPI) ListSkills(_ context.Context, org string) ([]claudeapi.Skill, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("ListSkills", org); err != nil {
+		return nil, err
+	}
+	return append([]claudeapi.Skill(nil), f.skills...), nil
+}
+
+func (f *fakeAPI) DownloadSkill(_ context.Context, _, id string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("DownloadSkill", id); err != nil {
+		return nil, err
+	}
+	b, ok := f.skillPkg[id]
+	if !ok {
+		return nil, notFound()
+	}
+	return append([]byte(nil), b...), nil
+}
+
+func (f *fakeAPI) UploadSkill(_ context.Context, _, fileName string, data []byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.enter("UploadSkill", fileName); err != nil {
+		return err
+	}
+	sk := claudeapi.Skill{ID: f.newID("tskill"), Name: strings.TrimSuffix(fileName, ".skill"), Source: "custom", CreatorType: "user"}
+	f.skills = append(f.skills, sk)
+	f.skillPkg[sk.ID] = append([]byte(nil), data...)
+	if err := f.lostReply; err != nil {
+		f.lostReply = nil
+		return err
+	}
+	return nil
 }

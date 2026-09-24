@@ -132,7 +132,7 @@ func (s *Session) Download(ctx context.Context, path string) (int, []byte, error
 	return r.Status, data, err
 }
 
-func (s *Session) Upload(ctx context.Context, path, fileName, mime string, data []byte) (int, []byte, error) {
-	r, err := s.eval(ctx, jsUpload(origin+path, fileName, mime, base64.StdEncoding.EncodeToString(data)))
+func (s *Session) Upload(ctx context.Context, path, fileName, mime string, data []byte, fields map[string]string) (int, []byte, error) {
+	r, err := s.eval(ctx, jsUpload(origin+path, fileName, mime, base64.StdEncoding.EncodeToString(data), fields))
 	return r.Status, []byte(r.Body), err
 }

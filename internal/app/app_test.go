@@ -3,6 +3,9 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -34,7 +37,7 @@ func (s *fakeSession) JSON(_ context.Context, method, path string, _ any) (int, 
 	return st, []byte(body), nil
 }
 func (s *fakeSession) Download(context.Context, string) (int, []byte, error) { return 404, nil, nil }
-func (s *fakeSession) Upload(_ context.Context, path, _, _ string, _ []byte) (int, []byte, error) {
+func (s *fakeSession) Upload(_ context.Context, path, _, _ string, _ []byte, _ map[string]string) (int, []byte, error) {
 	st, body := s.handle("UPLOAD", path)
 	return st, []byte(body), nil
 }
@@ -281,6 +284,8 @@ func TestNextAction(t *testing.T) {
 		{"failed", func(s *Status) { s.Failed = 1 }, "push"},
 		{"never verified", func(s *Status) { s.VerifiedAt = "" }, "verify"},
 		{"verify stale", func(s *Status) { s.VerifyStale = true }, "verify"},
+		{"verify found mismatches", func(s *Status) { s.VerifyOK, s.VerifyTotal = 33, 124 }, "review"},
+		{"memory not sent", func(s *Status) { s.MemoryPending = true }, "memory"},
 		{"all good", func(s *Status) {}, "done"},
 	}
 	for _, c := range cases {
@@ -350,5 +355,201 @@ func TestJobFillsMissingOrgName(t *testing.T) {
 	}
 	if s, _ := a.Status(); s.Target.OrgName != "Example Team" {
 		t.Fatalf("org name=%q", s.Target.OrgName)
+	}
+}
+
+func TestStatusCountsArtifacts(t *testing.T) {
+	sess := &fakeSession{handle: func(method, path string) (int, string) {
+		if method == "POST" && strings.HasSuffix(path, "/docs") {
+			return 201, `{"uuid":"td"}`
+		}
+		return defaultHandler(method, path)
+	}}
+	a, _ := newTestApp(t, sess)
+	seedOne(t, a)
+	a.st.SaveManifest(store.Manifest{SourceOrg: "personal", Total: 1, Complete: true, Chats: 3, Artifacts: 3, ArtifactsNoProject: 1})
+	a.st.SaveChat(store.ChatRecord{UUID: "c1", ProjectUUID: "s1", Artifacts: []store.ArtifactRecord{
+		{ID: "artifact:a", FileName: "Artifact - a.md", Content: "a"}, {ID: "artifact:b", FileName: "Artifact - b.md", Content: "b"}}})
+	a.st.SaveChat(store.ChatRecord{UUID: "c2", Artifacts: []store.ArtifactRecord{{ID: "artifact:c", FileName: "Artifact - c.md", Content: "c"}}})
+	a.SetOrg("target", "team", "Example Team")
+
+	s, _ := a.Status()
+	if s.Artifacts != 3 || s.ArtifactsSent != 0 || s.ArtifactsPending != 2 || s.ArtifactsNoProject != 1 {
+		t.Fatalf("before push: %+v", s)
+	}
+	if out, err := a.Push(""); err != nil || out.Status != "completed" {
+		t.Fatalf("push out=%+v err=%v", out, err)
+	}
+	s, _ = a.Status()
+	if s.ArtifactsSent != 2 || s.ArtifactsPending != 0 {
+		t.Fatalf("after push: sent=%d pending=%d", s.ArtifactsSent, s.ArtifactsPending)
+	}
+}
+
+func TestOpenArtifactsFolder(t *testing.T) {
+	a, _ := newTestApp(t, &fakeSession{handle: defaultHandler})
+	var opened string
+	a.openPath = func(p string) error { opened = p; return nil }
+	if err := a.OpenArtifactsFolder(); err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(a.st.Root(), "migration", "artifacts-export"); opened != want {
+		t.Fatalf("opened %q want %q", opened, want)
+	}
+	if _, err := os.Stat(opened); err != nil {
+		t.Fatalf("folder should exist even before any artifacts: %v", err)
+	}
+}
+
+func TestSyncMemorySendsOnceAndAgainWhenChanged(t *testing.T) {
+	imports := 0
+	var mu sync.Mutex
+	sess := &fakeSession{handle: func(method, path string) (int, string) {
+		if method == "POST" && strings.HasSuffix(path, "/melange/import_external") {
+			mu.Lock()
+			imports++
+			mu.Unlock()
+			return 200, `{}`
+		}
+		return defaultHandler(method, path)
+	}}
+	a, _ := newTestApp(t, sess)
+	a.SetOrg("target", "team", "Example Team")
+
+	if out, err := a.SyncMemory(); err != nil || out.Status != "empty" {
+		t.Fatalf("no memory yet: out=%+v err=%v", out, err)
+	}
+	a.st.SaveMemory("**Work context**\nv1")
+	if s, _ := a.Status(); !s.MemoryPending {
+		t.Fatalf("memory should be pending: %+v", s)
+	}
+	if out, err := a.SyncMemory(); err != nil || out.Status != "sent" || out.SentAt == "" {
+		t.Fatalf("first sync out=%+v err=%v", out, err)
+	}
+	if out, _ := a.SyncMemory(); out.Status != "unchanged" || imports != 1 {
+		t.Fatalf("second sync out=%+v imports=%d", out, imports)
+	}
+	if s, _ := a.Status(); s.MemoryPending || s.MemorySentAt == "" {
+		t.Fatalf("after sync status=%+v", s)
+	}
+	a.st.SaveMemory("**Work context**\nv2") // a later pull changed the memory
+	if s, _ := a.Status(); !s.MemoryPending {
+		t.Fatalf("changed memory should be pending again")
+	}
+	if out, _ := a.SyncMemory(); out.Status != "sent" || imports != 2 {
+		t.Fatalf("resync out=%+v imports=%d", out, imports)
+	}
+}
+
+func TestSyncMemoryNeedsLogin(t *testing.T) {
+	sess := &fakeSession{handle: func(method, path string) (int, string) {
+		if method == "POST" {
+			return 401, `{}`
+		}
+		return defaultHandler(method, path)
+	}}
+	a, _ := newTestApp(t, sess)
+	a.SetOrg("target", "team", "Example Team")
+	a.st.SaveMemory("m")
+	if out, err := a.SyncMemory(); err != nil || out.Status != "needs_login" {
+		t.Fatalf("out=%+v err=%v", out, err)
+	}
+	if s, _ := a.Status(); !s.MemoryPending {
+		t.Fatal("failed sync must leave memory pending")
+	}
+}
+
+// A project pulled after the selection was saved (e.g. found by a delta scan)
+// follows the default rules at push time instead of being silently skipped.
+func TestPushIncludesProjectsAddedAfterSelection(t *testing.T) {
+	created := 0
+	sess := &fakeSession{handle: func(method, path string) (int, string) {
+		if method == "POST" && strings.HasSuffix(path, "/projects") {
+			created++
+			return 201, fmt.Sprintf(`{"uuid":"tp%d"}`, created)
+		}
+		if method == "POST" && strings.HasSuffix(path, "/docs") {
+			return 201, `{"uuid":"td"}`
+		}
+		return defaultHandler(method, path)
+	}}
+	a, _ := newTestApp(t, sess)
+	seedOne(t, a) // s1 selected
+	a.st.SaveProject(store.ProjectMeta{UUID: "s2", Name: "Acme: New", Order: 1})
+	a.st.SaveProject(store.ProjectMeta{UUID: "s3", Name: "Personal: Diary", Order: 2})
+	a.SetOrg("target", "team", "Example Team")
+	out, err := a.Push("")
+	if err != nil || out.Result.CreatedProjects != 2 {
+		t.Fatalf("out=%+v err=%v", out, err)
+	}
+	sel, _ := a.st.LoadSelection()
+	if !sel["s2"] || sel["s3"] {
+		t.Fatalf("selection=%v", sel)
+	}
+}
+
+// syncWorld is a tiny source org (src) and target org (team) behind one session.
+func syncWorld() (*fakeSession, *int) {
+	created := 0
+	return &fakeSession{handle: func(method, path string) (int, string) {
+		switch {
+		case method == "GET" && path == "/api/organizations/src/projects":
+			return 200, `[{"uuid":"p1","name":"Acme: A","updated_at":"t1","docs_count":0,"files_count":0}]`
+		case method == "GET" && path == "/api/organizations/src/projects/p1":
+			return 200, `{"uuid":"p1","name":"Acme: A","updated_at":"t1"}`
+		case method == "GET" && (strings.HasSuffix(path, "/p1/docs") || strings.HasSuffix(path, "/p1/files")):
+			return 200, `[]`
+		case method == "GET" && path == "/api/organizations/src/memory":
+			return 200, `{"memory":"**Work context**"}`
+		case method == "GET" && strings.Contains(path, "/chat_conversations_v2"):
+			return 200, `{"data":[],"has_more":false}`
+		case method == "POST" && path == "/api/organizations/team/projects":
+			created++
+			return 201, `{"uuid":"tp1"}`
+		case method == "POST" && strings.HasSuffix(path, "/melange/import_external"):
+			return 200, `{}`
+		}
+		return defaultHandler(method, path)
+	}}, &created
+}
+
+func TestSyncChangesScansPushesAndSendsMemory(t *testing.T) {
+	sess, created := syncWorld()
+	a, _ := newTestApp(t, sess)
+	a.SetOrg("source", "src", "Personal")
+	a.SetOrg("target", "team", "Example Team")
+
+	out, err := a.SyncChanges()
+	if err != nil || out.Status != "completed" || out.Pull.ProjectsNew != 1 || out.Push.CreatedProjects != 1 || out.Memory != "sent" {
+		t.Fatalf("first sync out=%+v err=%v", out, err)
+	}
+	s, _ := a.Status()
+	if s.LastSyncAt == "" || s.LastSyncNewProjects != 1 || s.LastSyncSent != 1 {
+		t.Fatalf("status=%+v", s)
+	}
+	out, err = a.SyncChanges() // nothing changed in the source
+	if err != nil || out.Status != "completed" || out.Pull.ProjectsSkipped != 1 || out.Pull.ProjectsRead != 0 || out.Push.CreatedProjects != 0 || out.Memory != "unchanged" || *created != 1 {
+		t.Fatalf("second sync out=%+v err=%v created=%d", out, err, *created)
+	}
+	if s, _ := a.Status(); s.LastSyncNewProjects != 0 || s.LastSyncSent != 0 {
+		t.Fatalf("second status=%+v", s)
+	}
+}
+
+func TestSyncChangesStopsWhenPullStops(t *testing.T) {
+	sess, _ := syncWorld()
+	a, _ := newTestApp(t, sess)
+	a.SetOrg("source", "src", "Personal")
+	a.SetOrg("target", "team", "Example Team")
+	a.opts.Sleep = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
+	sess.fail = func(method, path string) error {
+		if strings.HasSuffix(path, "/p1/docs") {
+			return claudeapi.ErrSessionGone
+		}
+		return nil
+	}
+	out, err := a.SyncChanges()
+	if err != nil || out.Status != "needs_login" || out.Stage != "pull" || out.Push.CreatedProjects != 0 {
+		t.Fatalf("out=%+v err=%v", out, err)
 	}
 }

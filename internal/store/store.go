@@ -16,8 +16,12 @@ import (
 
 type Store struct{ root string }
 
-// DefaultRoot is <user config dir>/claude-sync.
+// DefaultRoot is $CLAUDE_SYNC_DATA if set (e.g. for a trial run or a demo),
+// otherwise <user config dir>/claude-sync.
 func DefaultRoot() (string, error) {
+	if d := os.Getenv("CLAUDE_SYNC_DATA"); d != "" {
+		return d, nil
+	}
 	d, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
@@ -27,9 +31,14 @@ func DefaultRoot() (string, error) {
 
 func Open(root string) (*Store, error) {
 	for _, d := range []string{filepath.Join(root, "migration", "projects"), filepath.Join(root, "profiles")} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
+		if err := os.MkdirAll(d, 0o700); err != nil {
 			return nil, err
 		}
+	}
+	// Private documents live here: keep the whole tree to the current user,
+	// including folders an older version created world-readable.
+	if err := os.Chmod(root, 0o700); err != nil { // #nosec G302 -- a directory needs the execute bit
+		return nil, err
 	}
 	return &Store{root: root}, nil
 }
@@ -53,7 +62,7 @@ func validID(id string) error {
 // renames it over path, so readers never see a half-written file.
 func WriteFileAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(dir, ".tmp-*")
@@ -62,11 +71,11 @@ func WriteFileAtomic(path string, data []byte) error {
 	}
 	defer os.Remove(tmp.Name()) // no-op after a successful rename
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // the write already failed; report that error
 		return err
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // the write already failed; report that error
 		return err
 	}
 	if err := tmp.Close(); err != nil {
@@ -84,7 +93,7 @@ func writeJSON(path string, v any) error {
 }
 
 func readJSON(path string, v any) error {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) // #nosec G304 -- paths are built from validated ids inside the data folder
 	if err != nil {
 		return err
 	}
@@ -97,9 +106,19 @@ type Manifest struct {
 	PulledAt      time.Time `json:"pulled_at"` // when the last COMPLETE pull finished
 	Total         int       `json:"total"`     // projects in the source at the last pull start
 	Complete      bool      `json:"complete"`  // false while a pull is running or was stopped
-	Projects      int       `json:"projects"`
-	Docs          int       `json:"docs"`
-	Files         int       `json:"files"`
+	Phase         string    `json:"phase"`     // "projects" or "chats" while a pull runs, "" otherwise
+	// Progress of the current phase, for the app's time-left estimate.
+	PhaseStartedAt     time.Time `json:"phase_started_at"`
+	PhaseDone          int       `json:"phase_done"`
+	PhaseTotal         int       `json:"phase_total"`
+	ChatsTotal         int       `json:"chats_total"` // chats in the source, listed before reading
+	Projects           int       `json:"projects"`
+	Docs               int       `json:"docs"`
+	Files              int       `json:"files"`
+	Chats              int       `json:"chats"`
+	Artifacts          int       `json:"artifacts"`
+	ArtifactsNoProject int       `json:"artifacts_no_project"` // from chats outside any project (kept locally only)
+	Skills             int       `json:"skills"`               // personal skills in the source
 }
 
 func (s *Store) SaveManifest(m Manifest) error { return writeJSON(s.path("manifest.json"), m) }
@@ -126,6 +145,23 @@ type ProjectMeta struct {
 	PromptTemplate string `json:"prompt_template"`
 	UpdatedAt      string `json:"updated_at"`
 	Order          int    `json:"order"`
+	// Synced is the project's listing signature (updated_at, doc and file
+	// counts) at its last COMPLETE pull; a delta pull skips the project while
+	// the listing still matches. Empty while a pull of it is unfinished.
+	Synced string `json:"synced,omitempty"`
+}
+
+// LoadProject returns a pulled project and whether it exists.
+func (s *Store) LoadProject(uuid string) (ProjectMeta, bool, error) {
+	var p ProjectMeta
+	if err := validID(uuid); err != nil {
+		return p, false, err
+	}
+	err := readJSON(s.path("projects", uuid, "project.json"), &p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return p, false, nil
+	}
+	return p, err == nil, err
 }
 
 func (s *Store) SaveProject(p ProjectMeta) error {
@@ -259,7 +295,7 @@ func (s *Store) eachJSON(dir string, fn func([]byte) error) error {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" || strings.HasPrefix(e.Name(), ".tmp") {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		b, err := os.ReadFile(filepath.Join(dir, e.Name())) // #nosec G304 -- listing of our own data folder
 		if err != nil {
 			return err
 		}
@@ -292,3 +328,5 @@ func (s *Store) LoadSelection() (map[string]bool, error) {
 func (s *Store) SaveSelection(sel map[string]bool) error {
 	return writeJSON(s.path("selection.json"), sel)
 }
+
+func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }

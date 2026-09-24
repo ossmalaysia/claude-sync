@@ -17,12 +17,25 @@ import (
 var _ API = (*claudeapi.Client)(nil)
 
 type PullResult struct {
-	Projects  int       `json:"projects"`
-	Docs      int       `json:"docs"`
-	Files     int       `json:"files"`
-	Bytes     int64     `json:"bytes"`
-	Converted int       `json:"converted"` // images saved as their WebP preview
-	Failed    []Failure `json:"failed"`
+	Projects  int   `json:"projects"`
+	Docs      int   `json:"docs"`
+	Files     int   `json:"files"`
+	Bytes     int64 `json:"bytes"`
+	Converted int   `json:"converted"` // images saved as their WebP preview
+	// Delta scan: projects read in full, skipped as unchanged, and new.
+	ProjectsRead    int `json:"projects_read"`
+	ProjectsSkipped int `json:"projects_skipped"`
+	ProjectsNew     int `json:"projects_new"`
+	ChatsRead       int `json:"chats_read"`    // new or changed chats fetched
+	ArtifactsNew    int `json:"artifacts_new"` // artifacts in those chats
+	Chats           int `json:"chats"`
+	Artifacts       int `json:"artifacts"` // artifacts and Claude-written files recovered from chats
+	// ArtifactsNoProject counts artifacts from chats outside any project;
+	// they are exported locally but not pushed.
+	ArtifactsNoProject int       `json:"artifacts_no_project"`
+	Failed             []Failure `json:"failed"`
+	Skills             int       `json:"skills"`      // personal skills in the source
+	SkillsRead         int       `json:"skills_read"` // new or changed skills downloaded
 }
 
 func mimeFor(name string) string {
@@ -47,7 +60,8 @@ func Pull(ctx context.Context, api API, st *store.Store, org string, opts Option
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return res, err
 	}
-	man.SourceOrg, man.Total, man.Complete = org, len(projects), false
+	man.SourceOrg, man.Total, man.Complete, man.Phase = org, len(projects), false, "projects"
+	man.PhaseStartedAt, man.PhaseDone, man.PhaseTotal = time.Now().UTC(), 0, len(projects)
 	if err := st.SaveManifest(man); err != nil {
 		return res, err
 	}
@@ -57,12 +71,45 @@ func Pull(ctx context.Context, api API, st *store.Store, org string, opts Option
 		report.emit(Event{Stage: "pull", Done: done, Total: len(projects), Level: "info", Message: msg, Docs: res.Docs, Files: res.Files, Bytes: res.Bytes})
 	}
 	for i, p := range projects {
+		man.PhaseDone = i
+		if err := st.SaveManifest(man); err != nil {
+			return res, err
+		}
 		progress(i, p.Name)
+		sig := fmt.Sprintf("%s|%d|%d", p.UpdatedAt, p.DocsCount, p.FilesCount)
+		saved, known, err := st.LoadProject(p.UUID)
+		if err != nil {
+			return res, err
+		}
+		if known && saved.Synced == "" && saved.UpdatedAt == p.UpdatedAt {
+			// Pulled by a version without markers: adopt it as complete when
+			// the local copy matches the listing's counts.
+			if ok, err := matchesCounts(st, p); err != nil {
+				return res, err
+			} else if ok {
+				saved.Synced = sig
+				if err := st.SaveProject(saved); err != nil {
+					return res, err
+				}
+			}
+		}
+		if known && saved.Synced != "" && saved.Synced == sig {
+			if err := countLocal(st, p.UUID, &res); err != nil {
+				return res, err
+			}
+			res.Projects++
+			res.ProjectsSkipped++
+			continue
+		}
+		if !known {
+			res.ProjectsNew++
+		}
 		tick := func() { progress(i, p.Name) }
-		if err := pullProject(ctx, api, st, org, p, i, opts, report, &res, tick); err != nil {
+		if err := pullProject(ctx, api, st, org, p, i, sig, opts, report, &res, tick); err != nil {
 			return res, fmt.Errorf("project %q: %w", p.Name, err)
 		}
 		res.Projects++
+		res.ProjectsRead++
 	}
 	memory, _, err := withRetry(ctx, opts, func() (string, error) { return api.GetMemory(ctx, org) })
 	if err != nil {
@@ -71,9 +118,31 @@ func Pull(ctx context.Context, api API, st *store.Store, org string, opts Option
 	if err := st.SaveMemory(memory); err != nil {
 		return res, err
 	}
+	// onPhase starts the chat phase once the chats are listed; onProgress
+	// saves running counts so the app can show progress and time left.
+	onPhase := func(total, toRead int) error {
+		man.Phase, man.ChatsTotal = "chats", total
+		man.PhaseStartedAt, man.PhaseDone, man.PhaseTotal = time.Now().UTC(), 0, toRead
+		man.Chats, man.Artifacts, man.ArtifactsNoProject = res.Chats, res.Artifacts, res.ArtifactsNoProject
+		return st.SaveManifest(man)
+	}
+	onProgress := func(read int) error {
+		man.PhaseDone = read
+		man.Chats, man.Artifacts, man.ArtifactsNoProject = res.Chats, res.Artifacts, res.ArtifactsNoProject
+		return st.SaveManifest(man)
+	}
+	if err := pullChats(ctx, api, st, org, opts, report, &res, onPhase, onProgress); err != nil {
+		return res, fmt.Errorf("chats: %w", err)
+	}
+	if err := pullSkills(ctx, api, st, org, opts, report, &res); err != nil {
+		return res, fmt.Errorf("skills: %w", err)
+	}
 	man.SourceAccount = sourceEmail(ctx, api)
-	man.PulledAt, man.Complete = time.Now().UTC(), true
+	man.PulledAt, man.Complete, man.Phase = time.Now().UTC(), true, ""
+	man.PhaseDone, man.PhaseTotal = 0, 0
 	man.Projects, man.Docs, man.Files = res.Projects, res.Docs, res.Files
+	man.Chats, man.Artifacts, man.ArtifactsNoProject = res.Chats, res.Artifacts, res.ArtifactsNoProject
+	man.Skills = res.Skills
 	if err := st.SaveManifest(man); err != nil {
 		return res, err
 	}
@@ -101,7 +170,7 @@ func sourceEmail(ctx context.Context, api API) string {
 	return acc.EmailAddress
 }
 
-func pullProject(ctx context.Context, api API, st *store.Store, org string, p claudeapi.Project, order int, opts Options, report Reporter, res *PullResult, tick func()) error {
+func pullProject(ctx context.Context, api API, st *store.Store, org string, p claudeapi.Project, order int, sig string, opts Options, report Reporter, res *PullResult, tick func()) error {
 	full, _, err := withRetry(ctx, opts, func() (claudeapi.Project, error) { return api.GetProject(ctx, org, p.UUID) })
 	if err != nil {
 		return err
@@ -164,5 +233,153 @@ func pullProject(ctx context.Context, api API, st *store.Store, org string, p cl
 		res.Bytes += int64(len(data))
 		tick()
 	}
+	// Mark the project complete only now, so an interrupted pull re-reads it.
+	meta.Synced = sig
+	if err := st.SaveProject(meta); err != nil {
+		return err
+	}
 	return nil
+}
+
+// chatPageSize is how many chats are listed per request.
+var chatPageSize = 50
+
+// chatProgressEvery is how often (in chats read) running counts are saved.
+var chatProgressEvery = 10
+
+// pullChats saves the final version of every artifact and Claude-written
+// file from every chat, plus a readable copy under artifacts-export/.
+// All chats are listed first, so the number still to read is known; chats
+// whose updated_at is unchanged since the last pull are not fetched again.
+func pullChats(ctx context.Context, api API, st *store.Store, org string, opts Options, report Reporter, res *PullResult,
+	onPhase func(total, toRead int) error, onProgress func(read int) error) error {
+	projects, err := st.ListProjects()
+	if err != nil {
+		return err
+	}
+	projectName := map[string]string{}
+	for _, p := range projects {
+		projectName[p.UUID] = p.Name
+	}
+
+	// 1. List every chat (cheap: one request per page).
+	var all []claudeapi.Chat
+	for offset := 0; ; {
+		type page struct {
+			chats []claudeapi.Chat
+			more  bool
+		}
+		pg, _, err := withRetry(ctx, opts, func() (page, error) {
+			c, more, err := api.ListChats(ctx, org, offset, chatPageSize)
+			return page{c, more}, err
+		})
+		if err != nil {
+			return err
+		}
+		all = append(all, pg.chats...)
+		report.emit(Event{Stage: "pull", Level: "info", Message: fmt.Sprintf("listing chats: %d found", len(all))})
+		if !pg.more || len(pg.chats) == 0 {
+			break
+		}
+		offset += len(pg.chats)
+	}
+
+	// 2. Unchanged chats are counted now; only the rest is work to do.
+	var toRead []claudeapi.Chat
+	for _, c := range all {
+		saved, ok, err := st.LoadChat(c.UUID)
+		if err != nil {
+			return err
+		}
+		if ok && saved.UpdatedAt == c.UpdatedAt {
+			res.Chats++
+			res.Artifacts += len(saved.Artifacts)
+			if saved.ProjectUUID == "" {
+				res.ArtifactsNoProject += len(saved.Artifacts)
+			}
+			continue
+		}
+		toRead = append(toRead, c)
+	}
+	if err := onPhase(len(all), len(toRead)); err != nil {
+		return err
+	}
+
+	// 3. Read the changed chats.
+	for i, c := range toRead {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		detail, _, err := withRetry(ctx, opts, func() (claudeapi.ChatDetail, error) { return api.GetChat(ctx, org, c.UUID) })
+		if err != nil {
+			if errors.Is(err, claudeapi.ErrAuth) || errors.Is(err, claudeapi.ErrSessionGone) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
+			fail := Failure{Project: projectName[c.ProjectUUID], Item: "chat " + c.Name, Error: err.Error()}
+			res.Failed = append(res.Failed, fail)
+			report.emit(Event{Stage: "pull", Level: "warn", Message: fail.Item + ": " + fail.Error})
+			continue
+		}
+		rec := store.ChatRecord{UUID: c.UUID, Name: c.Name, ProjectUUID: c.ProjectUUID, UpdatedAt: c.UpdatedAt, Artifacts: ExtractArtifacts(Branch(detail))}
+		folder := projectName[c.ProjectUUID]
+		if folder == "" {
+			folder = "No project"
+		}
+		for _, a := range rec.Artifacts {
+			if err := st.ExportArtifact(folder, c.Name, a); err != nil {
+				return err
+			}
+		}
+		// Saved last: its presence with this updated_at means "done".
+		if err := st.SaveChat(rec); err != nil {
+			return err
+		}
+		res.Chats++
+		res.ChatsRead++
+		res.Artifacts += len(rec.Artifacts)
+		res.ArtifactsNew += len(rec.Artifacts)
+		if rec.ProjectUUID == "" {
+			res.ArtifactsNoProject += len(rec.Artifacts)
+		}
+		read := i + 1
+		if read%chatProgressEvery == 0 {
+			if err := onProgress(read); err != nil {
+				return err
+			}
+		}
+		report.emit(Event{Stage: "pull", Level: "info", Done: read, Total: len(toRead), Message: fmt.Sprintf("chats: %d of %d read, %d artifacts", read, len(toRead), res.Artifacts)})
+	}
+	return onProgress(len(toRead))
+}
+
+// countLocal adds a skipped project's local docs and files to the totals.
+func countLocal(st *store.Store, project string, res *PullResult) error {
+	docs, err := st.ListDocs(project)
+	if err != nil {
+		return err
+	}
+	files, err := st.ListFiles(project)
+	if err != nil {
+		return err
+	}
+	res.Docs += len(docs)
+	res.Files += len(files)
+	for _, f := range files {
+		res.Bytes += f.SizeBytes
+	}
+	return nil
+}
+
+// matchesCounts reports whether the local copy has as many docs and files as
+// the listing says the project has.
+func matchesCounts(st *store.Store, p claudeapi.Project) (bool, error) {
+	docs, err := st.ListDocs(p.UUID)
+	if err != nil {
+		return false, err
+	}
+	files, err := st.ListFiles(p.UUID)
+	if err != nil {
+		return false, err
+	}
+	return len(docs) == p.DocsCount && len(files) == p.FilesCount, nil
 }

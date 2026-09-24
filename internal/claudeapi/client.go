@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 )
 
 type Client struct{ d Doer }
@@ -106,7 +107,7 @@ func (c *Client) DownloadPreview(ctx context.Context, org, fileUUID string) ([]b
 }
 
 func (c *Client) UploadFile(ctx context.Context, org, project, fileName, mime string, data []byte) (File, error) {
-	status, resp, err := c.d.Upload(ctx, base(org)+"/projects/"+project+"/upload", fileName, mime, data)
+	status, resp, err := c.d.Upload(ctx, base(org)+"/projects/"+project+"/upload", fileName, mime, data, nil)
 	if err != nil {
 		return File{}, err
 	}
@@ -118,6 +119,61 @@ func (c *Client) UploadFile(ctx context.Context, org, project, fileName, mime st
 		return File{}, fmt.Errorf("decode upload response: %w", err)
 	}
 	return out, nil
+}
+
+// ImportMemory sends memory text to claude.ai's memory import (the same call
+// as Settings > Memory > Start import > Add to memory). claude.ai merges it
+// into the account's memory in the background.
+func (c *Client) ImportMemory(ctx context.Context, org, text string) error {
+	return c.do(ctx, "POST", base(org)+"/melange/import_external", map[string]string{"raw_export": text}, nil)
+}
+
+// ListSkills returns every skill visible to the account, built-in ones included.
+func (c *Client) ListSkills(ctx context.Context, org string) ([]Skill, error) {
+	var out struct {
+		Skills []Skill `json:"skills"`
+	}
+	return out.Skills, c.do(ctx, "GET", base(org)+"/skills/list-skills", nil, &out)
+}
+
+// DownloadSkill returns the skill as a .skill package: a zip with SKILL.md
+// and every other file of the skill (scripts, references, images...).
+func (c *Client) DownloadSkill(ctx context.Context, org, skillID string) ([]byte, error) {
+	status, data, err := c.d.Download(ctx, base(org)+"/skills/download-dot-skill-file?skill_id="+url.QueryEscape(skillID)+"&include_blocked=true")
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckStatus(status, data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+// UploadSkill adds a .skill package to the account, as Customize > Skills >
+// Add > Upload skill does. It never overwrites an existing skill.
+func (c *Client) UploadSkill(ctx context.Context, org, fileName string, data []byte) error {
+	status, resp, err := c.d.Upload(ctx, base(org)+"/skills/upload-skill?overwrite=false&upload_source=customize_upload",
+		fileName, "application/zip", data, map[string]string{"upload_source": "customize_upload"})
+	if err != nil {
+		return err
+	}
+	return CheckStatus(status, resp)
+}
+
+// ListChats returns one page of the org's conversations and whether more exist.
+func (c *Client) ListChats(ctx context.Context, org string, offset, limit int) ([]Chat, bool, error) {
+	var out struct {
+		Data    []Chat `json:"data"`
+		HasMore bool   `json:"has_more"`
+	}
+	err := c.do(ctx, "GET", fmt.Sprintf("%s/chat_conversations_v2?limit=%d&offset=%d", base(org), limit, offset), nil, &out)
+	return out.Data, out.HasMore, err
+}
+
+// GetChat returns a conversation with every message and tool call.
+func (c *Client) GetChat(ctx context.Context, org, chat string) (ChatDetail, error) {
+	var out ChatDetail
+	return out, c.do(ctx, "GET", base(org)+"/chat_conversations/"+chat+"?tree=True&rendering_mode=messages&render_all_tools=true", nil, &out)
 }
 
 func (c *Client) GetMemory(ctx context.Context, org string) (string, error) {

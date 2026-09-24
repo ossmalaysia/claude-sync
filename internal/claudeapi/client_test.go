@@ -12,6 +12,7 @@ type call struct {
 	Method, Path, FileName, Mime string
 	Body                         any
 	Data                         []byte
+	Fields                       map[string]string
 }
 
 type fakeDoer struct {
@@ -31,8 +32,8 @@ func (d *fakeDoer) Download(_ context.Context, path string) (int, []byte, error)
 	return d.status, d.data, nil
 }
 
-func (d *fakeDoer) Upload(_ context.Context, path, name, mime string, data []byte) (int, []byte, error) {
-	d.calls = append(d.calls, call{Method: "UPLOAD", Path: path, FileName: name, Mime: mime, Data: data})
+func (d *fakeDoer) Upload(_ context.Context, path, name, mime string, data []byte, fields map[string]string) (int, []byte, error) {
+	d.calls = append(d.calls, call{Method: "UPLOAD", Path: path, FileName: name, Mime: mime, Data: data, Fields: fields})
 	return d.status, []byte(d.resp), nil
 }
 
@@ -195,5 +196,86 @@ func TestDownloadPreviewUsesPreviewPath(t *testing.T) {
 	}
 	if d.calls[0].Path != "/api/o1/files/f1/preview" {
 		t.Fatalf("path=%s", d.calls[0].Path)
+	}
+}
+
+func TestListChatsPaginates(t *testing.T) {
+	d := &fakeDoer{status: 200, resp: `{"data":[{"uuid":"c1","name":"Plan","project_uuid":"p1","updated_at":"2026-09-01T00:00:00Z"},{"uuid":"c2","name":"Loose","project_uuid":null,"updated_at":"x"}],"has_more":true}`}
+	chats, more, err := New(d).ListChats(ctx, "o1", 50, 25)
+	if err != nil || !more || len(chats) != 2 || chats[0].ProjectUUID != "p1" || chats[1].ProjectUUID != "" {
+		t.Fatalf("chats=%+v more=%v err=%v", chats, more, err)
+	}
+	if d.calls[0].Path != "/api/organizations/o1/chat_conversations_v2?limit=25&offset=50" {
+		t.Fatalf("path=%s", d.calls[0].Path)
+	}
+}
+
+func TestGetChatDecodesMessagesAndToolUse(t *testing.T) {
+	d := &fakeDoer{status: 200, resp: `{"uuid":"c1","name":"Plan","project_uuid":"p1","current_leaf_message_uuid":"m2",
+	"chat_messages":[{"uuid":"m1","parent_message_uuid":"root","index":0,"content":[{"type":"text","text":"hi"}]},
+	{"uuid":"m2","parent_message_uuid":"m1","index":1,"content":[{"type":"tool_use","name":"artifacts","input":{"id":"a1","command":"create","title":"T","type":"text/markdown","content":"# x"}}]}]}`}
+	c, err := New(d).GetChat(ctx, "o1", "c1")
+	if err != nil || c.CurrentLeaf != "m2" || len(c.Messages) != 2 || c.Messages[1].ParentUUID != "m1" {
+		t.Fatalf("c=%+v err=%v", c, err)
+	}
+	b := c.Messages[1].Content[0]
+	if b.Type != "tool_use" || b.Name != "artifacts" || b.Input["title"] != "T" {
+		t.Fatalf("block=%+v", b)
+	}
+	if d.calls[0].Path != "/api/organizations/o1/chat_conversations/c1?tree=True&rendering_mode=messages&render_all_tools=true" {
+		t.Fatalf("path=%s", d.calls[0].Path)
+	}
+}
+
+func TestImportMemoryPostsRawExport(t *testing.T) {
+	d := &fakeDoer{status: 200, resp: `{}`}
+	if err := New(d).ImportMemory(ctx, "o1", "**Work context**\nhello"); err != nil {
+		t.Fatal(err)
+	}
+	c := d.calls[0]
+	if c.Method != "POST" || c.Path != "/api/organizations/o1/melange/import_external" {
+		t.Fatalf("call=%+v", c)
+	}
+	assertJSON(t, c.Body, `{"raw_export":"**Work context**\nhello"}`)
+	d = &fakeDoer{status: 429, resp: `{}`}
+	if err := New(d).ImportMemory(ctx, "o1", "x"); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestListSkillsAndPersonalFilter(t *testing.T) {
+	d := &fakeDoer{status: 200, resp: `{"skills":[
+	{"id":"docs","name":"docs","source":"anthropic-example","creator_type":"anthropic","updated_at":"t"},
+	{"id":"skill_01A","name":"quotation","source":"custom","creator_type":"user","updated_at":"t1"},
+	{"id":"skill_01B","name":"invoice","source":"plugin","creator_type":"user","updated_at":"t2"},
+	{"id":"skill_01C","name":"sql","source":"plugin","creator_type":"anthropic","updated_at":"t3"}]}`}
+	skills, err := New(d).ListSkills(ctx, "o1")
+	if err != nil || len(skills) != 4 || d.calls[0].Path != "/api/organizations/o1/skills/list-skills" {
+		t.Fatalf("skills=%+v err=%v", skills, err)
+	}
+	var personal []string
+	for _, s := range skills {
+		if s.Personal() {
+			personal = append(personal, s.Name)
+		}
+	}
+	if len(personal) != 2 || personal[0] != "quotation" || personal[1] != "invoice" {
+		t.Fatalf("personal=%v", personal)
+	}
+}
+
+func TestDownloadAndUploadSkill(t *testing.T) {
+	d := &fakeDoer{status: 200, data: []byte("PK\x03\x04")}
+	b, err := New(d).DownloadSkill(ctx, "o1", "skill_01A")
+	if err != nil || string(b) != "PK\x03\x04" || d.calls[0].Path != "/api/organizations/o1/skills/download-dot-skill-file?skill_id=skill_01A&include_blocked=true" {
+		t.Fatalf("b=%q err=%v path=%s", b, err, d.calls[0].Path)
+	}
+	d = &fakeDoer{status: 200, resp: `{}`}
+	if err := New(d).UploadSkill(ctx, "o1", "quotation.skill", []byte("PK")); err != nil {
+		t.Fatal(err)
+	}
+	c := d.calls[0]
+	if c.Path != "/api/organizations/o1/skills/upload-skill?overwrite=false&upload_source=customize_upload" || c.FileName != "quotation.skill" || c.Fields["upload_source"] != "customize_upload" {
+		t.Fatalf("call=%+v", c)
 	}
 }

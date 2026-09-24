@@ -16,6 +16,8 @@ type PlanResult struct {
 	NewInstructions  int           `json:"new_instructions"`
 	NewDocs          int           `json:"new_docs"`
 	NewFiles         int           `json:"new_files"`
+	NewArtifacts     int           `json:"new_artifacts"`
+	NewSkills        int           `json:"new_skills"`
 	NewBytes         int64         `json:"new_bytes"`
 	RetryFailed      int           `json:"retry_failed"`
 	AlreadyDone      int           `json:"already_done"`
@@ -39,13 +41,17 @@ func Plan(st *store.Store, sel map[string]bool, state *store.State, org string, 
 	if err != nil {
 		return res, err
 	}
+	arts, err := artifactsByProject(st)
+	if err != nil {
+		return res, err
+	}
 	for _, p := range projects {
 		if !sel[p.UUID] {
 			continue
 		}
 		res.SelectedProjects++
 		ps := state.Projects[p.UUID]
-		var docsState, filesState map[string]*store.ItemState
+		var docsState, filesState, artsState map[string]*store.ItemState
 		var instr *store.ItemState
 		pending := false
 		if ps == nil || ps.Target == "" {
@@ -53,7 +59,7 @@ func Plan(st *store.Store, sel map[string]bool, state *store.State, org string, 
 			pending = true
 		}
 		if ps != nil {
-			docsState, filesState, instr = ps.Docs, ps.Files, ps.Instructions
+			docsState, filesState, artsState, instr = ps.Docs, ps.Files, ps.Artifacts, ps.Instructions
 		}
 		if p.PromptTemplate != "" {
 			switch {
@@ -105,8 +111,33 @@ func Plan(st *store.Store, sel map[string]bool, state *store.State, org string, 
 				pending = true
 			}
 		}
+		for _, a := range arts[p.UUID] {
+			it := itemOf(artsState, a.key())
+			switch {
+			case it == nil || it.Status == "":
+				res.NewArtifacts++
+				pending = true
+			case it.Status == store.StatusFailed:
+				res.RetryFailed++
+				pending = true
+			case it.SHA != "" && it.SHA != contentSHA(a.Content):
+				res.Changed = append(res.Changed, p.Name+": "+a.FileName)
+			}
+		}
 		if !pending {
 			res.AlreadyDone++
+		}
+	}
+	skills, err := st.ListSkills()
+	if err != nil {
+		return res, err
+	}
+	for _, sk := range skills {
+		switch it := itemOf(state.Skills, sk.ID); {
+		case it == nil || it.Status == "":
+			res.NewSkills++
+		case it.Status == store.StatusFailed:
+			res.RetryFailed++
 		}
 	}
 	return res, nil

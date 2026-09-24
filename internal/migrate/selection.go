@@ -33,3 +33,18 @@ func MergeSelection(projects []store.ProjectMeta, existing map[string]bool) map[
 	}
 	return out
 }
+
+// EffectiveSelection returns the saved selection with defaults applied to
+// projects that are new since it was saved, and saves the result.
+func EffectiveSelection(st *store.Store) (map[string]bool, error) {
+	projects, err := st.ListProjects()
+	if err != nil {
+		return nil, err
+	}
+	existing, err := st.LoadSelection()
+	if err != nil {
+		return nil, err
+	}
+	sel := MergeSelection(projects, existing)
+	return sel, st.SaveSelection(sel)
+}

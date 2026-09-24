@@ -46,7 +46,8 @@ func TestJSJSONWithoutBody(t *testing.T) {
 
 func TestJSDownloadAndUploadParse(t *testing.T) {
 	checkJS(t, jsDownload("https://claude.ai/api/organizations/o/files/f/contents"))
-	checkJS(t, jsUpload("https://claude.ai/api/organizations/o/projects/p/upload", `we"ird—name.pdf`, "application/pdf", "JVBERi0="))
+	checkJS(t, jsUpload("https://claude.ai/api/organizations/o/projects/p/upload", `we"ird—name.pdf`, "application/pdf", "JVBERi0=", nil))
+	checkJS(t, jsUpload("https://claude.ai/api/organizations/o/skills/upload-skill", "s.skill", "application/zip", "UEs=", map[string]string{"upload_source": `c"x`}))
 }
 
 // runJS evaluates snippet in node with location.host set to host and a fetch
@@ -75,7 +76,7 @@ func TestSnippetsNeverFetchOffClaude(t *testing.T) {
 	snippets := map[string]string{
 		"json":     jsJSON("GET", "https://claude.ai/api/organizations", nil),
 		"download": jsDownload("https://claude.ai/api/organizations/o/files/f/contents"),
-		"upload":   jsUpload("https://claude.ai/api/organizations/o/projects/p/upload", "a.pdf", "application/pdf", "JVBERi0="),
+		"upload":   jsUpload("https://claude.ai/api/organizations/o/projects/p/upload", "a.pdf", "application/pdf", "JVBERi0=", nil),
 	}
 	for name, src := range snippets {
 		if got := runJS(t, src, "login.microsoftonline.com"); got != `{"host":"login.microsoftonline.com","status":0,"fetched":false}` {

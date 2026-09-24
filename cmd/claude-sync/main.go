@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/ossmalaysia/claude-sync/internal/browser"
@@ -26,6 +27,9 @@ commands:
   push   --org <target-org-uuid>    create selected projects in the target org
   verify --org <target-org-uuid>    compare target counts with what was pushed
   smoke  --org <target-org-uuid>    create, check and delete a test project
+  memory --org <target-org-uuid>    send memory.md to the target's memory import (once per change)
+  sync   [--from <org>] [--to <org>] scan the source for new or changed data and send it
+                                    (defaults: the orgs used before)
 
 flags:
   --data <dir>   data folder (default: <user config dir>/claude-sync)
@@ -46,8 +50,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	data := fs.String("data", "", "data folder")
 	org := fs.String("org", "", "organization uuid")
 	account := fs.String("account", "", "source or target (login only)")
+	from := fs.String("from", "", "source org uuid (sync; default: the remembered source org)")
+	to := fs.String("to", "", "target org uuid (sync; default: the remembered target org)")
 	switch cmd {
-	case "login", "pull", "plan", "push", "verify", "smoke":
+	case "login", "pull", "plan", "push", "verify", "smoke", "memory", "sync":
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", cmd, usage)
 		return 2
@@ -59,7 +65,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "login needs --account source|target")
 		return 2
 	}
-	if cmd != "login" && *org == "" {
+	if cmd != "login" && cmd != "sync" && *org == "" {
 		fmt.Fprintf(stderr, "%s needs --org <uuid>\n", cmd)
 		return 2
 	}
@@ -78,6 +84,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
+	if cmd == "sync" {
+		if err := runSync(ctx, st, *from, *to, stdout); err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		return 0
+	}
 	if err := dispatch(ctx, cmd, st, *org, *account, stdout); err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
@@ -104,18 +117,7 @@ func connect(ctx context.Context, st *store.Store, account string, out io.Writer
 	return s, claudeapi.New(s), nil
 }
 
-func loadSelection(st *store.Store) (map[string]bool, error) {
-	projects, err := st.ListProjects()
-	if err != nil {
-		return nil, err
-	}
-	existing, err := st.LoadSelection()
-	if err != nil {
-		return nil, err
-	}
-	sel := migrate.MergeSelection(projects, existing)
-	return sel, st.SaveSelection(sel)
-}
+func loadSelection(st *store.Store) (map[string]bool, error) { return migrate.EffectiveSelection(st) }
 
 func dispatch(ctx context.Context, cmd string, st *store.Store, org, account string, out io.Writer) error {
 	opts := migrate.DefaultOptions()
@@ -135,8 +137,8 @@ func dispatch(ctx context.Context, cmd string, st *store.Store, org, account str
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "selected %d projects: create %d projects, %d instructions, %d docs, %d files (%.1f MB); retry %d failed; %d already done\n",
-			res.SelectedProjects, res.NewProjects, res.NewInstructions, res.NewDocs, res.NewFiles, float64(res.NewBytes)/(1<<20), res.RetryFailed, res.AlreadyDone)
+		fmt.Fprintf(out, "selected %d projects: create %d projects, %d instructions, %d docs, %d files (%.1f MB), %d artifacts; retry %d failed; %d already done\n",
+			res.SelectedProjects, res.NewProjects, res.NewInstructions, res.NewDocs, res.NewFiles, float64(res.NewBytes)/(1<<20), res.NewArtifacts, res.RetryFailed, res.AlreadyDone)
 		for _, s := range res.Skipped {
 			fmt.Fprintf(out, "  skip (too large): %s / %s (%.1f MB)\n", s.Project, s.File, float64(s.SizeBytes)/(1<<20))
 		}
@@ -184,7 +186,7 @@ func dispatch(ctx context.Context, cmd string, st *store.Store, org, account str
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "pulled %d projects, %d docs, %d files (%.1f MB), %d images as WebP preview, %d failed\n", res.Projects, res.Docs, res.Files, float64(res.Bytes)/(1<<20), res.Converted, len(res.Failed))
+		fmt.Fprintf(out, "pulled %d projects, %d docs, %d files (%.1f MB), %d images as WebP preview; %d chats, %d artifacts; %d failed\n", res.Projects, res.Docs, res.Files, float64(res.Bytes)/(1<<20), res.Converted, res.Chats, res.Artifacts, len(res.Failed))
 		fmt.Fprintf(out, "memory saved to %s — paste it into claude.ai Settings → Memory in the target account\n", st.Root()+"/migration/memory.md")
 	case "push":
 		state, err := st.LoadState()
@@ -196,7 +198,7 @@ func dispatch(ctx context.Context, cmd string, st *store.Store, org, account str
 			return err
 		}
 		res, err := migrate.Push(ctx, c, st, state, org, sel, opts, report)
-		fmt.Fprintf(out, "created %d projects, %d instructions, %d docs, %d files; %d failed\n", res.CreatedProjects, res.Instructions, res.Docs, res.Files, len(res.Failed))
+		fmt.Fprintf(out, "created %d projects, %d instructions, %d docs, %d files, %d artifacts, %d skills; %d failed\n", res.CreatedProjects, res.Instructions, res.Docs, res.Files, res.Artifacts, res.Skills, len(res.Failed))
 		for _, f := range res.Failed {
 			fmt.Fprintf(out, "  FAILED %s / %s: %s\n", f.Project, f.Item, f.Error)
 		}
@@ -213,7 +215,7 @@ func dispatch(ctx context.Context, cmd string, st *store.Store, org, account str
 		if err != nil {
 			return err
 		}
-		rows, err := migrate.Verify(ctx, c, st, state, org, opts)
+		rows, err := migrate.Verify(ctx, c, st, state, org, opts, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -226,20 +228,119 @@ func dispatch(ctx context.Context, cmd string, st *store.Store, org, account str
 			}
 			fmt.Fprintf(out, "%s %-45s docs %d/%d files %d/%d %s\n", mark, r.Name, r.GotDocs, r.WantDocs, r.GotFiles, r.WantFiles, r.Error)
 		}
-		// Record the result where the desktop app reads it.
-		settings, err := st.LoadSettings()
-		if err != nil {
-			return err
+		waiting := 0
+		for _, r := range rows {
+			if !r.OK && r.Waiting > 0 {
+				waiting++
+			}
 		}
-		settings.VerifiedAt, settings.VerifyOK, settings.VerifyTotal = time.Now().UTC(), len(rows)-bad, len(rows)
-		if err := st.SaveSettings(settings); err != nil {
-			return err
+		if bad > 0 && bad == waiting {
+			fmt.Fprintf(out, "%d of %d projects match; the other %d only need their artifacts sent (select them and push)\n", len(rows)-bad, len(rows), bad)
+			return nil
 		}
 		if bad > 0 {
-			return fmt.Errorf("%d of %d projects do not match", bad, len(rows))
+			return fmt.Errorf("%d of %d projects do not match (%d of them only need their artifacts sent)", bad, len(rows), waiting)
 		}
 	case "smoke":
 		return runSmoke(ctx, c, org, out)
+	case "memory":
+		res, err := migrate.SyncMemory(ctx, c, st, org)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "memory: %s\n", map[string]string{
+			"sent":      "sent; claude.ai adds it to memory in the background",
+			"unchanged": "already sent (memory.md has not changed)",
+			"empty":     "memory.md is empty; run pull first",
+		}[res])
 	}
 	return nil
+}
+
+// runSync is the CLI's "Scan & sync": a delta pull (only new or changed
+// projects and chats are read), a push of everything new, then memory if it
+// changed. Orgs default to the ones remembered from earlier runs.
+func runSync(ctx context.Context, st *store.Store, from, to string, out io.Writer) error {
+	settings, err := st.LoadSettings()
+	if err != nil {
+		return err
+	}
+	if from == "" {
+		from = settings.SourceOrg
+		if from == "" {
+			if m, err := st.LoadManifest(); err == nil {
+				from = m.SourceOrg
+			}
+		}
+	}
+	state, err := st.LoadState()
+	if err != nil {
+		return err
+	}
+	if to == "" {
+		to = settings.TargetOrg
+		if to == "" {
+			to = state.TargetOrg
+		}
+	}
+	if from == "" || to == "" {
+		return errors.New("sync needs --from and --to the first time (or run pull and push once)")
+	}
+	opts := migrate.DefaultOptions()
+	report := func(e migrate.Event) {
+		if e.Level != "info" {
+			fmt.Fprintf(out, "%s %s\n", strings.ToUpper(e.Level), e.Message)
+		}
+	}
+	release, err := st.AcquireJob("pull")
+	if err != nil {
+		return err
+	}
+	src, sc, err := connect(ctx, st, "source", out)
+	if err != nil {
+		release()
+		return err
+	}
+	pull, err := migrate.Pull(ctx, sc, st, from, opts, func(e migrate.Event) { st.TouchJob(); report(e) })
+	src.Close()
+	release()
+	if err != nil {
+		return fmt.Errorf("scan: %w", err)
+	}
+	fmt.Fprintf(out, "scan: %d new projects, %d changed, %d unchanged; %d new or changed chats (%d artifacts); %d of %d personal skills new or changed\n",
+		pull.ProjectsNew, pull.ProjectsRead-pull.ProjectsNew, pull.ProjectsSkipped, pull.ChatsRead, pull.ArtifactsNew, pull.SkillsRead, pull.Skills)
+
+	if release, err = st.AcquireJob("push"); err != nil {
+		return err
+	}
+	defer release()
+	dst, dc, err := connect(ctx, st, "target", out)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+	sel, err := migrate.EffectiveSelection(st)
+	if err != nil {
+		return err
+	}
+	res, err := migrate.Push(ctx, dc, st, state, to, sel, opts, func(e migrate.Event) { st.TouchJob(); report(e) })
+	if err != nil {
+		return fmt.Errorf("send: %w", err)
+	}
+	sent := res.CreatedProjects + res.Instructions + res.Docs + res.Files + res.Artifacts + res.Skills
+	fmt.Fprintf(out, "send: %d projects, %d instructions, %d docs, %d files, %d artifacts, %d skills; %d failed\n",
+		res.CreatedProjects, res.Instructions, res.Docs, res.Files, res.Artifacts, res.Skills, len(res.Failed))
+	mem, err := migrate.SyncMemory(ctx, dc, st, to)
+	if err != nil {
+		return fmt.Errorf("memory: %w", err)
+	}
+	fmt.Fprintf(out, "memory: %s\n", mem)
+
+	if settings, err = st.LoadSettings(); err != nil {
+		return err
+	}
+	settings.LastSyncAt = time.Now().UTC()
+	settings.LastSyncNewProjects, settings.LastSyncChangedProjects = pull.ProjectsNew, pull.ProjectsRead-pull.ProjectsNew
+	settings.LastSyncChats, settings.LastSyncArtifacts, settings.LastSyncSent = pull.ChatsRead, pull.ArtifactsNew, sent
+	return st.SaveSettings(settings)
 }

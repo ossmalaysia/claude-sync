@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -175,5 +176,39 @@ func TestLoadManifestUpgradesLegacyCompletePull(t *testing.T) {
 	m, err := s.LoadManifest()
 	if err != nil || !m.Complete || m.Total != 172 {
 		t.Fatalf("m=%+v err=%v", m, err)
+	}
+}
+
+// The data folder holds private documents; other local users must not be
+// able to list or read it.
+func TestDataFolderIsPrivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permissions")
+	}
+	root := filepath.Join(t.TempDir(), "claude-sync")
+	os.MkdirAll(root, 0o755) // an older install created it world-readable
+	s, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SaveDoc("p1", DocRecord{UUID: "d1", FileName: "a.md", Content: "secret"})
+	for _, p := range []string{root, filepath.Join(root, "migration", "projects", "p1", "docs")} {
+		fi, _ := os.Stat(p)
+		if fi.Mode().Perm()&0o077 != 0 {
+			t.Errorf("%s mode %v is readable by others", p, fi.Mode().Perm())
+		}
+	}
+	fi, _ := os.Stat(filepath.Join(root, "migration", "projects", "p1", "docs", "d1.json"))
+	if fi.Mode().Perm()&0o077 != 0 {
+		t.Errorf("file mode %v is readable by others", fi.Mode().Perm())
+	}
+}
+
+func TestDefaultRootHonoursEnvOverride(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_SYNC_DATA", dir)
+	got, err := DefaultRoot()
+	if err != nil || got != dir {
+		t.Fatalf("got %q err=%v, want %q", got, err, dir)
 	}
 }

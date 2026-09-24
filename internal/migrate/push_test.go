@@ -324,3 +324,53 @@ func TestPushAddOnlyResyncPicksUpOnlyNewItems(t *testing.T) {
 		t.Fatalf("re-sync calls=%v", calls)
 	}
 }
+
+func seedChat(t *testing.T, st *store.Store, uuid, project string, arts ...store.ArtifactRecord) {
+	t.Helper()
+	if err := st.SaveChat(store.ChatRecord{UUID: uuid, Name: uuid, ProjectUUID: project, UpdatedAt: "t", Artifacts: arts}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPushAddsProjectArtifactsAsDocs(t *testing.T) {
+	api, st, state, sel := pushFixture(t)
+	seedChat(t, st, "chat1", "s1", store.ArtifactRecord{ID: "artifact:a1", Kind: "artifact", FileName: "Artifact - Brief.md", Content: "# Brief"})
+	seedChat(t, st, "loose", "", store.ArtifactRecord{ID: "artifact:a2", Kind: "artifact", FileName: "Artifact - Idea.md", Content: "idea"})
+
+	res, err := push(t, api, st, state, sel, testOpts())
+	if err != nil || res.Artifacts != 1 {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	found := false
+	for _, d := range api.docs[state.Projects["s1"].Target] {
+		if d.FileName == "Artifact - Brief.md" && d.Content == "# Brief" {
+			found = true
+		}
+		if d.FileName == "Artifact - Idea.md" {
+			t.Fatal("artifacts from chats outside a project must not be pushed")
+		}
+	}
+	if !found {
+		t.Fatalf("artifact doc missing: %+v", api.docs[state.Projects["s1"].Target])
+	}
+	if it := state.Projects["s1"].Artifacts["chat1/artifact:a1"]; it == nil || it.Status != store.StatusDone {
+		t.Fatalf("artifact state=%+v", it)
+	}
+	before := len(api.calls)
+	if res, err := push(t, api, st, state, sel, testOpts()); err != nil || res.Artifacts != 0 || len(api.calls) != before {
+		t.Fatalf("second push res=%+v err=%v extra calls=%v", res, err, api.calls[before:])
+	}
+}
+
+// Artifacts found by a later pull are added to projects pushed earlier.
+func TestPushAddsNewArtifactsToAlreadyPushedProject(t *testing.T) {
+	api, st, state, sel := pushFixture(t)
+	if _, err := push(t, api, st, state, sel, testOpts()); err != nil {
+		t.Fatal(err)
+	}
+	seedChat(t, st, "chat1", "s2", store.ArtifactRecord{ID: "file:/out/r.md", Kind: "file", FileName: "Artifact - r.md", Content: "r"})
+	res, err := push(t, api, st, state, sel, testOpts())
+	if err != nil || res.Artifacts != 1 || res.CreatedProjects != 0 || api.count("CreateDoc") != 4 {
+		t.Fatalf("res=%+v err=%v CreateDoc=%d", res, err, api.count("CreateDoc"))
+	}
+}

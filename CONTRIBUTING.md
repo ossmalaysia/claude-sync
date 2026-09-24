@@ -39,6 +39,17 @@ wails dev
 5. Open a pull request describing what changed and how you tested it. If you
    tested against real claude.ai accounts, say so (without sharing their data).
 
+## Screenshots for the docs
+
+Never take screenshots with a real account. `scripts/demo_data.py` builds demo
+data folders with made-up projects, and `scripts/screenshot.sh` (macOS) runs the
+app on one of them and captures its window:
+
+```bash
+python3 scripts/demo_data.py /tmp/claude-sync-demo
+scripts/screenshot.sh /tmp/claude-sync-demo/done docs/images/done.png
+```
+
 ## Reporting bugs
 
 Use the bug report template. Include your OS, app version, browser, and the

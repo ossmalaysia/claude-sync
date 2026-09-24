@@ -75,3 +75,17 @@ func TestPlanRefusesOtherOrg(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestPlanCountsArtifacts(t *testing.T) {
+	st := newTestStore(t)
+	seedProject(t, st, 0, "p1", "A", "", nil, nil)
+	st.SaveChat(store.ChatRecord{UUID: "c1", ProjectUUID: "p1", Artifacts: []store.ArtifactRecord{{ID: "artifact:a", FileName: "Artifact - a.md", Content: "x"}, {ID: "artifact:b", FileName: "Artifact - b.md", Content: "y"}}})
+	state := &store.State{TargetOrg: "org"}
+	ps := state.Project("p1")
+	ps.Target = "t1"
+	ps.Artifacts["c1/artifact:a"] = &store.ItemState{Status: store.StatusDone, SHA: contentSHA("changed since")}
+	res, err := Plan(st, map[string]bool{"p1": true}, state, "org", testOpts())
+	if err != nil || res.NewArtifacts != 1 || len(res.Changed) != 1 || res.Changed[0] != "A: Artifact - a.md" {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+}
