@@ -1,9 +1,8 @@
 name: build
 on:
   push:
-    tags: ['v*']
-  push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
