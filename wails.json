@@ -1,0 +1,19 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "Claude Sync",
+  "outputfilename": "Claude Sync",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "Anchor Sprint"
+  },
+  "info": {
+    "companyName": "Anchor Sprint",
+    "productName": "Claude Sync",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright \u00a9 2026 Anchor Sprint Sdn Bhd",
+    "comments": "Migrate claude.ai Projects between accounts. https://www.anchorsprint.com/"
+  }
+}

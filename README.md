@@ -1,0 +1,116 @@
+<p align="center">
+  <img src="docs/logo.png" width="112" alt="Claude Sync logo" />
+</p>
+
+<h1 align="center">Claude Sync</h1>
+
+<p align="center">
+  Move your claude.ai Projects from one account to another.<br />
+  Desktop app for macOS and Windows, plus a command-line tool.
+</p>
+
+<p align="center">
+  <a href="https://github.com/ossmalaysia/claude-sync/actions/workflows/build.yml"><img src="https://github.com/ossmalaysia/claude-sync/actions/workflows/build.yml/badge.svg" alt="build" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license" /></a>
+</p>
+
+---
+
+Switching from a personal claude.ai account to a team account, or between two
+organizations? claude.ai has no way to import Projects, and the official data
+export leaves out knowledge-file contents. Claude Sync copies them for you:
+
+- Project name, description and visibility
+- Project instructions
+- Text knowledge docs, with their full content
+- Uploaded knowledge files, byte for byte (images: see [limitations](#limitations))
+- Account memory, exported as `memory.md` for you to paste into the new account
+
+> [!IMPORTANT]
+> Claude Sync is an independent open-source project. It is **not affiliated
+> with, endorsed by, or supported by Anthropic**. It uses claude.ai's
+> undocumented web API through a real browser window, so it can break when
+> claude.ai changes. Automated use may conflict with the claude.ai Terms of
+> Service: read them, and use this tool at your own risk.
+
+## How it works
+
+You log in to both accounts in browser windows the app opens. Claude Sync never
+sees your password. Then:
+
+1. **Download from source.** Everything is copied to a folder on your computer.
+   Your old account is only read, never changed.
+2. **Choose projects.** Tick what to move. Projects named `Personal:…`,
+   `Family:…` or `Travel…` start unticked.
+3. **Send to target.** Projects are created one request at a time. Existing
+   content in the target is never edited or deleted.
+4. **Check the target.** Doc and file counts are compared with your local copy.
+
+Pull and push can be stopped at any time and resumed later. Progress is saved
+after every step, so a resumed push never creates duplicates. The home screen
+always shows the real state, even after a restart.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
+
+## Install
+
+Download the latest build from
+[Releases](https://github.com/ossmalaysia/claude-sync/releases) (or the
+artifacts of the latest [build](https://github.com/ossmalaysia/claude-sync/actions/workflows/build.yml)).
+
+Requirements: macOS 10.13+ or Windows 10/11, with **Google Chrome** or
+**Microsoft Edge** installed. Set `CLAUDE_SYNC_BROWSER` to use another
+Chromium-based browser.
+
+Builds are not code-signed yet:
+
+- **macOS:** right-click *Claude Sync.app* and choose **Open**.
+- **Windows:** in the SmartScreen prompt choose **More info**, then **Run anyway**.
+
+## Command line
+
+The same engine is available as a CLI, useful for scripting or large moves:
+
+```bash
+go run ./cmd/claude-sync login  --account source     # log in and list org ids
+go run ./cmd/claude-sync pull   --org <source-org>   # download (resumable)
+go run ./cmd/claude-sync plan   --org <target-org>   # dry run, no network
+go run ./cmd/claude-sync smoke  --org <target-org>   # check the target accepts writes
+go run ./cmd/claude-sync push   --org <target-org>   # send (resumable)
+go run ./cmd/claude-sync verify --org <target-org>   # compare counts
+```
+
+Edit `selection.json` in the data folder to choose projects from the CLI. The
+app and the CLI share the same data, and a lock stops them running two jobs at
+once.
+
+## Limitations
+
+- **Chats are not migrated.** claude.ai cannot recreate conversations.
+- **Memory cannot be written automatically.** Copy `memory.md` from the app and
+  paste it into the target account under Settings, Memory.
+- **Images** have no downloadable original on claude.ai. The full-resolution
+  preview is saved and uploaded as `<name>.webp` instead.
+- Files larger than 30 MB are skipped and reported.
+
+## Development
+
+Requirements: Go 1.26+, Node 20+, and the [Wails](https://wails.io) CLI.
+
+```bash
+go install github.com/wailsapp/wails/v2/cmd/wails@latest
+wails dev                              # run the desktop app with live reload
+go test ./...                          # Go tests, no browser needed
+(cd frontend && npm install && npm test)
+wails build -platform darwin/universal # macOS app
+wails build -platform windows/amd64    # Windows app (cross-builds from macOS)
+```
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+[MIT](LICENSE). Developed by [Anchor Sprint](https://www.anchorsprint.com/).
+
+"Claude" is a trademark of Anthropic, PBC, used here only to describe
+compatibility. This project is not an Anthropic product.

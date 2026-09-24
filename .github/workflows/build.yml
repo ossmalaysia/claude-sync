@@ -1,0 +1,55 @@
+name: build
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: darwin/universal
+            artifact: claude-sync-macos
+          - os: windows-latest
+            platform: windows/amd64
+            artifact: claude-sync-windows
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Wails CLI (same version as go.mod)
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)
+      - name: Frontend tests
+        working-directory: frontend
+        run: npm ci && npm test && npm run build
+      - name: Go tests
+        run: go test ./...
+      - name: Install NSIS
+        if: runner.os == 'Windows'
+        run: choco install nsis -y
+      - name: Build
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            wails build -platform ${{ matrix.platform }} -clean -nsis
+          else
+            wails build -platform ${{ matrix.platform }} -clean
+            hdiutil create -volname "Claude Sync" -srcfolder "build/bin/Claude Sync.app" -ov -format UDZO "build/bin/Claude Sync.dmg"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            build/bin/*.dmg
+            build/bin/*.exe
