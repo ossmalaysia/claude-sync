@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 (2026-09-25)
+
+- Using Claude Sync on a second computer no longer sends everything again: before creating a project, the push looks for the same project in the target and sends only the docs, files and artifacts it does not have yet. Existing instructions are never overwritten.
+- Footer links open through the app itself, limited to its own pages.
+
 ## 0.1.0 (2026-09-25)
 
 First public release.

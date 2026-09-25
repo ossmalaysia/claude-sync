@@ -31,7 +31,7 @@ type Emitter func(ctx context.Context, event string, data any)
 
 // Version is shown in the app. Release builds set it from the git tag:
 // -ldflags "-X github.com/ossmalaysia/claude-sync/internal/app.Version=v0.1.0".
-var Version = "v0.1.0-dev"
+var Version = "v0.1.1-dev"
 
 // Version reports the build's version for display.
 func (a *App) Version() string { return Version }

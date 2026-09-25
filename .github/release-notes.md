@@ -1,4 +1,6 @@
-First public test release of Claude Sync: copy your claude.ai Projects, artifacts, personal skills and memory from one account to another (for example, personal to your team account).
+Claude Sync: copy your claude.ai Projects, artifacts, personal skills and memory from one account to another (for example, personal to your team account).
+
+**What's new:** see the [changelog](https://github.com/ossmalaysia/claude-sync/blob/main/CHANGELOG.md).
 
 **This is an early test version.** Please [report anything odd](https://github.com/ossmalaysia/claude-sync/issues/new/choose); the app's version is shown at the bottom of its window.
 

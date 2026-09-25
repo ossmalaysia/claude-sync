@@ -328,8 +328,8 @@ func runSync(ctx context.Context, st *store.Store, from, to string, out io.Write
 		return fmt.Errorf("send: %w", err)
 	}
 	sent := res.CreatedProjects + res.Instructions + res.Docs + res.Files + res.Artifacts + res.Skills
-	fmt.Fprintf(out, "send: %d projects, %d instructions, %d docs, %d files, %d artifacts, %d skills; %d failed\n",
-		res.CreatedProjects, res.Instructions, res.Docs, res.Files, res.Artifacts, res.Skills, len(res.Failed))
+	fmt.Fprintf(out, "send: %d projects (%d already in the target), %d instructions, %d docs, %d files, %d artifacts, %d skills; %d failed\n",
+		res.CreatedProjects, res.AdoptedProjects, res.Instructions, res.Docs, res.Files, res.Artifacts, res.Skills, len(res.Failed))
 	mem, err := migrate.SyncMemory(ctx, dc, st, to)
 	if err != nil {
 		return fmt.Errorf("memory: %w", err)

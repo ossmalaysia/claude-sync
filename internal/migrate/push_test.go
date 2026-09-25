@@ -374,3 +374,62 @@ func TestPushAddsNewArtifactsToAlreadyPushedProject(t *testing.T) {
 		t.Fatalf("res=%+v err=%v CreateDoc=%d", res, err, api.count("CreateDoc"))
 	}
 }
+
+// A second computer has no state.json: its push must recognise what the first
+// computer already sent instead of creating everything again.
+func TestPushFromAnotherComputerAdoptsWhatIsAlreadyInTheTarget(t *testing.T) {
+	api, st, state, sel := pushFixture(t)
+	seedChat(t, st, "chat1", "s1", store.ArtifactRecord{ID: "artifact:a", FileName: "Artifact - a.md", Content: "a"})
+	if _, err := push(t, api, st, state, sel, testOpts()); err != nil {
+		t.Fatal(err)
+	}
+	projects, docs, files, instr := api.count("CreateProject"), api.count("CreateDoc"), api.count("UploadFile"), api.count("SetInstructions")
+
+	// Same local copy, fresh state, plus one doc that is new since.
+	fresh := &store.State{}
+	st.SaveDoc("s1", store.DocRecord{UUID: "d9", FileName: "new.md", Content: "new"})
+	res, err := Push(context.Background(), api, st, fresh, "org", sel, testOpts(), nil)
+	if err != nil || len(res.Failed) != 0 {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if res.CreatedProjects != 0 || res.AdoptedProjects != 2 {
+		t.Fatalf("res=%+v", res)
+	}
+	if api.count("CreateProject") != projects || api.count("UploadFile") != files || api.count("SetInstructions") != instr {
+		t.Fatalf("re-sent existing items: projects %d->%d files %d->%d instructions %d->%d",
+			projects, api.count("CreateProject"), files, api.count("UploadFile"), instr, api.count("SetInstructions"))
+	}
+	if api.count("CreateDoc") != docs+1 || res.Docs != 1 || res.Artifacts != 0 {
+		t.Fatalf("want only the new doc sent: CreateDoc %d->%d res=%+v", docs, api.count("CreateDoc"), res)
+	}
+	// Both same-named source projects map to different target projects.
+	if fresh.Projects["s1"].Target == "" || fresh.Projects["s1"].Target == fresh.Projects["s2"].Target {
+		t.Fatalf("targets=%q %q", fresh.Projects["s1"].Target, fresh.Projects["s2"].Target)
+	}
+}
+
+// A project whose name is not in the target is still created.
+func TestPushCreatesProjectsTheTargetDoesNotHave(t *testing.T) {
+	api, st, state, sel := pushFixture(t)
+	api.CreateProject(context.Background(), "org", claudeapi.NewProject{Name: "Someone else's project"})
+	res, err := push(t, api, st, state, sel, testOpts())
+	if err != nil || res.CreatedProjects != 2 || res.AdoptedProjects != 0 {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+}
+
+// If an existing target project cannot be read, the project is skipped, never
+// duplicated.
+func TestPushSkipsAdoptedProjectItCannotRead(t *testing.T) {
+	api, st, state, sel := pushFixture(t)
+	push(t, api, st, state, sel, testOpts())
+	before := api.count("CreateProject") + api.count("CreateDoc")
+	api.failNext("ListDocs", httpErr(400, nil))
+	res, err := Push(context.Background(), api, st, &store.State{}, "org", sel, testOpts(), nil)
+	if err != nil || len(res.Failed) != 1 || res.AdoptedProjects != 1 {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if after := api.count("CreateProject") + api.count("CreateDoc"); after != before {
+		t.Fatalf("created %d items after a failed read", after-before)
+	}
+}

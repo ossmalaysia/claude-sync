@@ -50,6 +50,8 @@ func defaultHandler(method, path string) (int, string) {
 		return 200, orgsJSON
 	case method == "POST" && strings.HasSuffix(path, "/projects"):
 		return 201, `{"uuid":"tp1","name":"x"}`
+	case method == "GET" && strings.HasSuffix(path, "/projects"):
+		return 200, `[]` // an empty target: push checks it before creating
 	}
 	return 404, `{}`
 }

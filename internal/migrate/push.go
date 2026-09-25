@@ -11,6 +11,8 @@ import (
 
 type PushResult struct {
 	CreatedProjects int       `json:"created_projects"`
+	AdoptedProjects int       `json:"adopted_projects"` // already in the target (e.g. sent from another computer)
+	AlreadyThere    int       `json:"already_there"`    // items found in an adopted project, not sent again
 	Instructions    int       `json:"instructions"`
 	Docs            int       `json:"docs"`
 	Files           int       `json:"files"`
@@ -33,6 +35,9 @@ type pushRun struct {
 	current string // uuid of the project being pushed
 	touched map[string]bool
 	arts    map[string][]artifactRef
+	// unclaimed lists target projects by name that no source project is
+	// mapped to yet, loaded on first need.
+	unclaimed map[string][]string
 }
 
 // Push creates the selected projects in the target org. It only ever
@@ -95,6 +100,30 @@ func (r *pushRun) fail(item, msg string) {
 
 func (r *pushRun) pushProject(p store.ProjectMeta) error {
 	ps := r.state.Project(p.UUID)
+	if ps.Target == "" {
+		// Another computer (or a lost state.json) may already have sent this
+		// project: use it rather than creating a duplicate.
+		existing, err := r.existingProject(p.Name)
+		if err != nil {
+			if stop := stopErr(err); stop != nil {
+				return errors.Join(stop, r.save())
+			}
+			ps.Status, ps.Error = store.StatusFailed, "could not check the target for this project: "+err.Error()
+			r.fail("project", ps.Error)
+			return r.save()
+		}
+		if existing != "" {
+			ps.Target, ps.Status, ps.Error = existing, "", ""
+			if err := r.adoptItems(p, ps); err != nil {
+				if errors.Is(err, errStopProject) {
+					return r.save()
+				}
+				return err
+			}
+			r.res.AdoptedProjects++
+			r.report.emit(Event{Stage: "push", Level: "info", Message: p.Name + ": already in the target, sending only what is missing"})
+		}
+	}
 	if ps.Target == "" {
 		created, attempts, err := withRetry(r.ctx, r.opts, func() (claudeapi.Project, error) {
 			return r.api.CreateProject(r.ctx, r.org, claudeapi.NewProject{Name: p.Name, Description: p.Description, IsPrivate: p.IsPrivate})
