@@ -26,6 +26,11 @@ Download the latest release from
 
 ![First launch](images/welcome.png)
 
+The first time you open Claude Sync, it shows a short notice: what the app does,
+that it only adds to the target account and never edits or deletes, and that you
+are responsible for what you copy there (for example, your employer's rules for a
+company account). Tick the box and click **Continue**.
+
 1. Click **Connect source account**. A Chrome (or Edge) window opens on claude.ai.
 2. Log in to the account you are moving **from**, as you normally would.
    Claude Sync never sees your password. The login is saved in a private browser

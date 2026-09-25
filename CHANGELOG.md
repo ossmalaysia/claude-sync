@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 (2026-09-25)
+
+- A first-use notice explains what Claude Sync does and that the user is responsible for what is copied into the target account; nothing runs until it is accepted.
+
 ## 0.1.1 (2026-09-25)
 
 - Using Claude Sync on a second computer no longer sends everything again: before creating a project, the push looks for the same project in the target and sends only the docs, files and artifacts it does not have yet. Existing instructions are never overwritten.

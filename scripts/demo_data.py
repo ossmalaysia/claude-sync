@@ -79,7 +79,7 @@ def pulled(root, when):
 
 
 def settings(root, extra=None):
-    s = {"source_org": SRC, "source_org_name": "Alex (personal)", "target_org": TGT, "target_org_name": "Acme Team"}
+    s = {"terms_version": "1", "source_org": SRC, "source_org_name": "Alex (personal)", "target_org": TGT, "target_org_name": "Acme Team"}
     s.update(extra or {})
     write(os.path.join(root, "migration", "settings.json"), s)
 

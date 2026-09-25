@@ -31,7 +31,7 @@ type Emitter func(ctx context.Context, event string, data any)
 
 // Version is shown in the app. Release builds set it from the git tag:
 // -ldflags "-X github.com/ossmalaysia/claude-sync/internal/app.Version=v0.1.0".
-var Version = "v0.1.1-dev"
+var Version = "v0.1.2-dev"
 
 // Version reports the build's version for display.
 func (a *App) Version() string { return Version }
@@ -327,6 +327,9 @@ func (a *App) resolveOrg(account, org string) (string, error) {
 // startJob takes the cross-process job lock and a cancellable context that
 // StopJob cancels. finish must be called when the job ends.
 func (a *App) startJob(kind string) (ctx context.Context, report migrate.Reporter, finish func(), err error) {
+	if !a.termsAccepted() {
+		return nil, nil, nil, ErrTermsNotAccepted
+	}
 	release, err := a.st.AcquireJob(kind)
 	if err != nil {
 		return nil, nil, nil, err
@@ -594,10 +597,11 @@ type Status struct {
 	ArtifactsPending   int `json:"artifacts_pending"`    // in selected projects, not sent yet
 	ArtifactsNoProject int `json:"artifacts_no_project"` // from chats outside a project: local export only
 
-	Skills        int `json:"skills"`         // personal skills in the source (built-in ones are not copied)
-	SkillsSent    int `json:"skills_sent"`    // uploaded to (or already in) the target
-	SkillsPending int `json:"skills_pending"` // pulled, not sent yet
-	SkillsFailed  int `json:"skills_failed"`  // last upload failed; retried by the next push
+	Skills        int  `json:"skills"`         // personal skills in the source (built-in ones are not copied)
+	SkillsSent    int  `json:"skills_sent"`    // uploaded to (or already in) the target
+	SkillsPending int  `json:"skills_pending"` // pulled, not sent yet
+	SkillsFailed  int  `json:"skills_failed"`  // last upload failed; retried by the next push
+	TermsAccepted bool `json:"terms_accepted"` // the first-use notice was accepted
 
 	Projects int `json:"projects"` // projects on disk
 	Selected int `json:"selected"`
@@ -670,6 +674,7 @@ func (a *App) Status() (Status, error) {
 	s.Source.Org, s.Source.OrgName = a.orgOf("source")
 	s.Target.Org, s.Target.OrgName = a.orgOf("target")
 	s.Job = a.st.RunningJob()
+	s.TermsAccepted = a.termsAccepted()
 
 	if m, err := a.st.LoadManifest(); err == nil {
 		s.PullTotal, s.PullComplete, s.PullPhase = m.Total, m.Complete, m.Phase

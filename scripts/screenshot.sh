@@ -1,6 +1,6 @@
 #!/bin/bash
 # scripts/screenshot.sh <data-dir> <out.png> (macOS): launch Claude Sync on a
-# demo data folder (see demo_data.py) and capture its window for the docs.: launch Claude Sync on a demo data folder and capture its window.
+# demo data folder (see demo_data.py) and capture its window for the docs.
 set -e
 APP="$(cd "$(dirname "$0")/.." && pwd)/build/bin/Claude Sync.app/Contents/MacOS/Claude Sync"
 osascript -e 'quit app "Claude Sync"' 2>/dev/null || true

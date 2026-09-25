@@ -29,6 +29,9 @@ type Settings struct {
 	LastSyncChats           int       `json:"last_sync_chats"`
 	LastSyncArtifacts       int       `json:"last_sync_artifacts"`
 	LastSyncSent            int       `json:"last_sync_sent"`
+	// The first-use notice the user accepted, and when.
+	TermsVersion    string    `json:"terms_version,omitempty"`
+	TermsAcceptedAt time.Time `json:"terms_accepted_at,omitempty"`
 }
 
 func (s *Store) LoadSettings() (Settings, error) {

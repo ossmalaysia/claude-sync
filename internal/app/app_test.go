@@ -66,6 +66,9 @@ func newTestApp(t *testing.T, sess *fakeSession) (*App, *int) {
 	a := New(st, func(string) (Session, error) { opens++; return sess, nil }, nil)
 	a.opts.Sleep = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
 	a.opts.WritePause = 0
+	if err := a.AcceptTerms(); err != nil {
+		t.Fatal(err)
+	}
 	return a, &opens
 }
 
@@ -306,6 +309,7 @@ func TestProgressEventsAreEmitted(t *testing.T) {
 	a := New(st, func(string) (Session, error) { return &fakeSession{handle: defaultHandler}, nil },
 		func(_ context.Context, name string, _ any) { mu.Lock(); events = append(events, name); mu.Unlock() })
 	a.opts.Sleep = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
+	a.AcceptTerms()
 	seedOne(t, a)
 	a.ConnectAccount("target")
 	a.Push("team")

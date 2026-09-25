@@ -3,6 +3,7 @@
   import * as Go from '../wailsjs/go/app/App.js';
   import { ClipboardSetText, EventsOn } from '../wailsjs/runtime/runtime.js';
   import Select from './views/Select.svelte';
+  import Notice from './views/Notice.svelte';
   import logo from './assets/logo.png';
   import { pullProgressText } from './lib/format.js';
   import { artifactLine, lastSyncLine, memoryLine, nextButton, selectionLine, skillLine, progress, pullLine, pushLine, verifyLine } from './lib/status.js';
@@ -152,7 +153,9 @@
   </header>
 
   <main>
-    {#if view === 'select'}
+    {#if status && !status.terms_accepted}
+      <Notice done={refresh} />
+    {:else if view === 'select'}
       <Select done={() => { view = 'home'; refresh(); }} />
     {:else if status}
       <section class="transfer" aria-label="Accounts">
