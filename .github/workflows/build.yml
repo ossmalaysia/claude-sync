@@ -43,7 +43,9 @@ jobs:
         run: go test ./...
       - name: Install NSIS
         if: runner.os == 'Windows'
-        run: choco install nsis -y
+        run: |
+          choco install nsis -y
+          echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
       - name: Build
         env:
           # the tag for a release, otherwise dev-<commit>; passed via env, not interpolated into the script
@@ -61,6 +63,7 @@ jobs:
           path: |
             build/bin/*.dmg
             build/bin/*.exe
+          if-no-files-found: error
 
   # A v* tag builds the apps above, then puts them on a DRAFT release. A
   # maintainer reviews the draft and publishes it by hand.
