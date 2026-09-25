@@ -75,7 +75,33 @@ Chromium-based browser.
 Builds are not code-signed yet:
 
 - **macOS:** right-click *Claude Sync.app* and choose **Open**.
-- **Windows:** in the SmartScreen prompt choose **More info**, then **Run anyway**.
+- **Windows:** see the note below.
+
+### Note for Windows users
+
+Pick one download:
+
+- `Claude-Sync-Windows-installer.exe` installs Claude Sync with a Start menu
+  entry and an uninstaller.
+- `Claude-Sync-Windows.exe` is the app itself: no install, just run it.
+
+The first time you run either, Windows shows **"Windows protected your PC"**
+with *Unknown publisher*. That is Microsoft Defender SmartScreen reacting to an
+app that is new and not yet code-signed, not a virus warning. Click
+**More info**, then **Run anyway** (if you only see **Don't run**, click
+**More info** first). Windows remembers the choice for that file.
+
+If you want to check that your download is the one built by this repository,
+compare its hash with `SHA256SUMS.txt` on the release page. In PowerShell:
+
+```powershell
+Get-FileHash .\Claude-Sync-Windows-installer.exe -Algorithm SHA256
+```
+
+Your company's IT may block unsigned apps entirely; in that case ask them to
+allow it, or wait for signed releases. Windows builds will be signed through
+[SignPath Foundation](#code-signing-policy), after which the warning shows the
+publisher and goes away as the app gains reputation.
 
 ## Command line
 

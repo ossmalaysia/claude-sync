@@ -20,7 +20,7 @@ Download the latest release from
 | System | File | First launch |
 |---|---|---|
 | macOS (Apple Silicon and Intel) | `Claude-Sync-macOS.dmg` | Open the `.dmg` and drag **Claude Sync** to Applications. The app is not code-signed yet, so the first time, **right-click** it and choose **Open**, then **Open** again. |
-| Windows | `Claude-Sync-Windows-installer.exe` | Run the installer. If SmartScreen says "Windows protected your PC", click **More info**, then **Run anyway**. |
+| Windows | `Claude-Sync-Windows-installer.exe` (or `Claude-Sync-Windows.exe` to run without installing) | Run it. If SmartScreen says "Windows protected your PC", click **More info**, then **Run anyway**. This appears because the app is not code-signed yet; see the [note for Windows users](../README.md#note-for-windows-users). |
 
 ## 2. Connect the account you are moving **from**
 
