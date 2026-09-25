@@ -122,6 +122,31 @@ wails build -platform windows/amd64    # Windows app (cross-builds from macOS)
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Privacy
+
+Claude Sync collects no data. It has no telemetry, analytics or accounts of its
+own, and it will not transfer any information to other networked systems unless
+the user asks it to. It connects only to claude.ai, in a browser window on your
+computer, to read the source account and write to the target account you
+choose. Everything it downloads (projects, artifacts, skills, memory) and your
+browser logins stay in a private folder on your computer; delete that folder to
+remove them.
+
+## Code signing policy
+
+Windows releases are signed with free code signing provided by
+[SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org). (Signing is being set up; v0.1.0 is
+not signed yet.)
+
+Only builds made by this repository's GitHub Actions workflow from its own source
+are signed, and each signing request is approved by hand.
+
+| Role | Who |
+|---|---|
+| Committers and reviewers | [Members of the claude-sync maintainers](https://github.com/ossmalaysia/claude-sync/graphs/contributors); changes from other contributors are reviewed in pull requests |
+| Approvers | [@jazztong](https://github.com/jazztong) |
+
 ## License
 
 [MIT](LICENSE). Developed by [Anchor Sprint](https://www.anchorsprint.com/).

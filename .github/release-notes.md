@@ -14,6 +14,8 @@ You need Google Chrome or Microsoft Edge. The app is not code-signed yet:
 - **macOS:** right-click **Claude Sync** in Applications, choose **Open**, then **Open** again.
 - **Windows:** if SmartScreen appears, click **More info**, then **Run anyway**.
 
+Code signing: Windows releases are signed with free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org) (being set up; see the [code signing policy](https://github.com/ossmalaysia/claude-sync#code-signing-policy)).
+
 Step-by-step guide with screenshots: [docs/USER_GUIDE.md](https://github.com/ossmalaysia/claude-sync/blob/main/docs/USER_GUIDE.md)
 
 ## What it copies
