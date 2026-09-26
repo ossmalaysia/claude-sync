@@ -17,6 +17,7 @@ type PlanResult struct {
 	NewDocs          int           `json:"new_docs"`
 	NewFiles         int           `json:"new_files"`
 	NewArtifacts     int           `json:"new_artifacts"`
+	NewChats         int           `json:"new_chats"` // chat transcripts, when chosen
 	NewSkills        int           `json:"new_skills"`
 	NewBytes         int64         `json:"new_bytes"`
 	RetryFailed      int           `json:"retry_failed"`
@@ -41,7 +42,11 @@ func Plan(st *store.Store, sel map[string]bool, state *store.State, org string, 
 	if err != nil {
 		return res, err
 	}
-	arts, err := artifactsByProject(st)
+	arts, err := artifactsToSend(st)
+	if err != nil {
+		return res, err
+	}
+	chats, err := transcriptsToSend(st)
 	if err != nil {
 		return res, err
 	}
@@ -111,6 +116,20 @@ func Plan(st *store.Store, sel map[string]bool, state *store.State, org string, 
 				pending = true
 			}
 		}
+		var chatsState map[string]*store.ItemState
+		if ps != nil {
+			chatsState = ps.Chats
+		}
+		for _, c := range chats[p.UUID] {
+			switch it := itemOf(chatsState, c.UUID); {
+			case it == nil || it.Status == "":
+				res.NewChats++
+				pending = true
+			case it.Status == store.StatusFailed:
+				res.RetryFailed++
+				pending = true
+			}
+		}
 		for _, a := range arts[p.UUID] {
 			it := itemOf(artsState, a.key())
 			switch {
@@ -127,6 +146,10 @@ func Plan(st *store.Store, sel map[string]bool, state *store.State, org string, 
 		if !pending {
 			res.AlreadyDone++
 		}
+	}
+	settings, err := st.LoadSettings()
+	if err != nil || settings.SkipSkills {
+		return res, err
 	}
 	skills, err := st.ListSkills()
 	if err != nil {

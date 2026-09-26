@@ -437,3 +437,25 @@ func TestPullAdoptsCompleteLegacyProjects(t *testing.T) {
 		t.Fatal("adopted project should get its marker")
 	}
 }
+
+// Chats keep their conversation as a transcript; chats saved before
+// transcripts existed are read once more to fill it in.
+func TestPullKeepsTranscriptsAndBackfillsOldChats(t *testing.T) {
+	api := newFakeAPI()
+	p := api.addProject("Acme: Website", "", nil, nil)
+	c := api.addChat("Kick-off", p.UUID, "t1", claudeapi.ChatMessage{UUID: "m1", Sender: "human", Content: []claudeapi.ContentBlock{{Type: "text", Text: "Hello there"}}})
+	st := newTestStore(t)
+	st.SaveChat(store.ChatRecord{UUID: c.UUID, ProjectUUID: p.UUID, UpdatedAt: "t1"}) // from an older version
+	if _, err := Pull(context.Background(), api, st, "o", testOpts(), nil); err != nil {
+		t.Fatal(err)
+	}
+	rec, _, _ := st.LoadChat(c.UUID)
+	if !strings.Contains(rec.Transcript, "Hello there") || rec.TranscriptAs != "Chat - Kick-off.md" {
+		t.Fatalf("rec=%+v", rec)
+	}
+	before := api.count("GetChat")
+	Pull(context.Background(), api, st, "o", testOpts(), nil)
+	if api.count("GetChat") != before {
+		t.Fatal("a chat with a transcript and the same updated_at must not be read again")
+	}
+}

@@ -79,7 +79,7 @@ def pulled(root, when):
 
 
 def settings(root, extra=None):
-    s = {"terms_version": "1", "source_org": SRC, "source_org_name": "Alex (personal)", "target_org": TGT, "target_org_name": "Acme Team"}
+    s = {"terms_version": "1", "copy_reviewed_at": "2026-09-01T00:00:00Z", "source_org": SRC, "source_org_name": "Alex (personal)", "target_org": TGT, "target_org_name": "Acme Team"}
     s.update(extra or {})
     write(os.path.join(root, "migration", "settings.json"), s)
 
@@ -105,7 +105,7 @@ for name in ("welcome", "ready", "syncing", "done"):
 
 # ready: pulled, orgs chosen, nothing sent yet
 sel = pulled(os.path.join(out, "ready"), now - timedelta(minutes=12))
-settings(os.path.join(out, "ready"))
+settings(os.path.join(out, "ready"), {"copy_reviewed_at": None})
 
 # done: everything sent and verified, memory sent, last sync found a little
 root = os.path.join(out, "done")

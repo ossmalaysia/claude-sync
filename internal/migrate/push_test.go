@@ -433,3 +433,68 @@ func TestPushSkipsAdoptedProjectItCannotRead(t *testing.T) {
 		t.Fatalf("created %d items after a failed read", after-before)
 	}
 }
+
+func TestPushSendsChatTranscriptsOnlyWhenChosen(t *testing.T) {
+	api, st, state, sel := pushFixture(t)
+	st.SaveChat(store.ChatRecord{UUID: "chat1", ProjectUUID: "s1", UpdatedAt: "t", Transcript: "# Kick-off\n\nhello", TranscriptAs: "Chat - Kick-off (2026-08-01).md"})
+	st.SaveChat(store.ChatRecord{UUID: "chat2", ProjectUUID: "", UpdatedAt: "t", Transcript: "# Loose", TranscriptAs: "Chat - Loose.md"})
+
+	res, err := push(t, api, st, state, sel, testOpts())
+	if err != nil || res.Chats != 0 {
+		t.Fatalf("not chosen: res=%+v err=%v", res, err)
+	}
+	set, _ := st.LoadSettings()
+	set.ChatChoice = store.ChatsInclude
+	st.SaveSettings(set)
+	if plan, _ := Plan(st, sel, state, "org", testOpts()); plan.NewChats != 1 {
+		t.Fatalf("plan=%+v (chats outside a project stay local)", plan)
+	}
+	res, err = push(t, api, st, state, sel, testOpts())
+	if err != nil || res.Chats != 1 || len(res.Touched) != 1 || res.Touched[0] != "s1" {
+		t.Fatalf("chosen: res=%+v err=%v", res, err)
+	}
+	if res, _ := push(t, api, st, state, sel, testOpts()); res.Chats != 0 {
+		t.Fatal("a transcript is sent once")
+	}
+	st.SaveSelection(sel)
+	rows, err := Verify(context.Background(), api, st, state, "org", testOpts(), nil, map[string]bool{"s1": true})
+	if err != nil || len(rows) != 1 || !rows[0].OK || rows[0].WantDocs != 3 {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+}
+
+func setSettings(t *testing.T, st *store.Store, change func(*store.Settings)) {
+	t.Helper()
+	s, err := st.LoadSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	change(&s)
+	if err := st.SaveSettings(s); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Artifacts switched off on "What to copy" are neither planned nor sent.
+func TestPushAndPlanLeaveArtifactsOutWhenSwitchedOff(t *testing.T) {
+	api, st, state, sel := pushFixture(t)
+	seedChat(t, st, "chat1", "s1", store.ArtifactRecord{ID: "artifact:a1", Kind: "artifact", FileName: "Artifact - Brief.md", Content: "# Brief"})
+	setSettings(t, st, func(s *store.Settings) { s.SkipArtifacts = true })
+	if plan, err := Plan(st, sel, state, "org", testOpts()); err != nil || plan.NewArtifacts != 0 {
+		t.Fatalf("plan=%+v err=%v", plan, err)
+	}
+	res, err := push(t, api, st, state, sel, testOpts())
+	if err != nil || res.Artifacts != 0 || len(state.Projects["s1"].Artifacts) != 0 {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if plan, _ := Plan(st, sel, state, "org", testOpts()); plan.AlreadyDone != 2 {
+		t.Fatalf("a project must not wait on switched-off artifacts: %+v", plan)
+	}
+	setSettings(t, st, func(s *store.Settings) { s.SkipArtifacts = false })
+	if plan, _ := Plan(st, sel, state, "org", testOpts()); plan.NewArtifacts != 1 {
+		t.Fatalf("switched back on: %+v", plan)
+	}
+	if res, err := push(t, api, st, state, sel, testOpts()); err != nil || res.Artifacts != 1 {
+		t.Fatalf("switched back on: res=%+v err=%v", res, err)
+	}
+}

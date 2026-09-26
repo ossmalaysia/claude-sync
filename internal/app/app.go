@@ -31,7 +31,7 @@ type Emitter func(ctx context.Context, event string, data any)
 
 // Version is shown in the app. Release builds set it from the git tag:
 // -ldflags "-X github.com/ossmalaysia/claude-sync/internal/app.Version=v0.1.0".
-var Version = "v0.1.2-dev"
+var Version = "v0.1.3-dev"
 
 // Version reports the build's version for display.
 func (a *App) Version() string { return Version }
@@ -74,8 +74,9 @@ func openInFileManager(path string) error {
 // links are the only pages the app opens, so the page cannot be used to
 // launch arbitrary URLs.
 var links = map[string]string{
-	"website": "https://www.anchorsprint.com/",
-	"issues":  "https://github.com/ossmalaysia/claude-sync/issues/new/choose",
+	"website":  "https://www.anchorsprint.com/",
+	"issues":   "https://github.com/ossmalaysia/claude-sync/issues/new/choose",
+	"projects": "https://claude.ai/projects",
 }
 
 // OpenLink opens one of the app's own web pages in the default browser.
@@ -420,7 +421,11 @@ func (a *App) GetSelection() ([]SelectionRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	sel := migrate.MergeSelection(projects, existing)
+	settings, err := a.st.LoadSettings()
+	if err != nil {
+		return nil, err
+	}
+	sel := migrate.MergeSelection(projects, existing, settings.PersonalChoice == store.PersonalInclude)
 	if err := a.st.SaveSelection(sel); err != nil {
 		return nil, err
 	}
@@ -468,6 +473,11 @@ func (a *App) Push(org string) (PushOutcome, error) {
 	org, err := a.resolveOrg("target", org)
 	if err != nil {
 		return PushOutcome{}, err
+	}
+	if pending, err := a.copyReviewPending(); err != nil {
+		return PushOutcome{}, err
+	} else if pending {
+		return PushOutcome{}, ErrReviewCopy
 	}
 	ctx, report, finish, err := a.startJob("push")
 	if err != nil {
@@ -517,14 +527,20 @@ func (a *App) Verify(org string) ([]migrate.VerifyRow, error) {
 func (a *App) MemoryText() (string, error) { return a.st.LoadMemory() }
 
 type MemoryOutcome struct {
-	Status string `json:"status"` // "sent" | "unchanged" | "empty" | "needs_login"
+	Status string `json:"status"` // "sent" | "unchanged" | "empty" | "skipped" | "needs_login"
 	SentAt string `json:"sent_at"`
 }
 
 // SyncMemory sends memory.md to the target account's memory import, the same
 // call as Settings > Memory > Start import. The same text is never sent twice:
-// claude.ai merges imports, so a repeat could duplicate entries.
+// claude.ai merges imports, so a repeat could duplicate entries. Nothing is
+// sent ("skipped") while memory is switched off in "What to copy".
 func (a *App) SyncMemory() (MemoryOutcome, error) {
+	if settings, err := a.st.LoadSettings(); err != nil {
+		return MemoryOutcome{}, err
+	} else if settings.SkipMemory {
+		return MemoryOutcome{Status: "skipped", SentAt: a.memorySentAt()}, nil
+	}
 	if pending, err := migrate.MemoryPending(a.st); err != nil {
 		return MemoryOutcome{}, err
 	} else if !pending {
@@ -602,6 +618,22 @@ type Status struct {
 	SkillsPending int  `json:"skills_pending"` // pulled, not sent yet
 	SkillsFailed  int  `json:"skills_failed"`  // last upload failed; retried by the next push
 	TermsAccepted bool `json:"terms_accepted"` // the first-use notice was accepted
+	// "What to copy" was saved at least once, and the kinds switched off there.
+	CopyReviewed  bool `json:"copy_reviewed"`
+	SkipArtifacts bool `json:"skip_artifacts"`
+	SkipSkills    bool `json:"skip_skills"`
+	SkipMemory    bool `json:"skip_memory"`
+	// Projects that look personal (Personal:, Family:, Travel), how many of
+	// them are not selected, and the user's choice ("" = not asked yet).
+	PersonalProjects int    `json:"personal_projects"`
+	PersonalSkipped  int    `json:"personal_skipped"`
+	PersonalChoice   string `json:"personal_choice"`
+	// Chats in the selected projects, and how many of their transcripts are
+	// sent or waiting; ChatChoice is "" until the user is asked.
+	ChatsInProjects int    `json:"chats_in_projects"`
+	ChatsSent       int    `json:"chats_sent"`
+	ChatsPending    int    `json:"chats_pending"`
+	ChatChoice      string `json:"chat_choice"`
 
 	Projects int `json:"projects"` // projects on disk
 	Selected int `json:"selected"`
@@ -622,7 +654,7 @@ type Status struct {
 	VerifyNotSelected int  `json:"verify_not_selected"` // sent earlier but not selected now (not checked)
 
 	MemorySentAt  string `json:"memory_sent_at"` // last time memory was sent to the target
-	MemoryPending bool   `json:"memory_pending"` // memory.md has text that was not sent yet
+	MemoryPending bool   `json:"memory_pending"` // memory.md has text that was not sent yet (false while memory is switched off)
 
 	LastSyncAt              string `json:"last_sync_at"`
 	LastSyncNewProjects     int    `json:"last_sync_new_projects"`
@@ -697,11 +729,24 @@ func (a *App) Status() (Status, error) {
 	if err != nil {
 		return s, err
 	}
-	sel := migrate.MergeSelection(projects, saved) // read-only: Status must not write
+	choice, err := a.st.LoadSettings()
+	if err != nil {
+		return s, err
+	}
+	s.PersonalChoice, s.ChatChoice = choice.PersonalChoice, choice.ChatChoice
+	s.CopyReviewed = !choice.CopyReviewedAt.IsZero()
+	s.SkipArtifacts, s.SkipSkills, s.SkipMemory = choice.SkipArtifacts, choice.SkipSkills, choice.SkipMemory
+	sel := migrate.MergeSelection(projects, saved, choice.PersonalChoice == store.PersonalInclude) // read-only: Status must not write
 
 	for _, p := range projects {
 		if sel[p.UUID] {
 			s.Selected++
+		}
+		if migrate.LooksPersonal(p.Name) {
+			s.PersonalProjects++
+			if !sel[p.UUID] {
+				s.PersonalSkipped++
+			}
 		}
 	}
 	state, err := a.st.LoadState()
@@ -716,8 +761,9 @@ func (a *App) Status() (Status, error) {
 			s.Error = err.Error()
 		} else {
 			s.PendingProjects = plan.NewProjects
-			s.PendingItems = plan.NewInstructions + plan.NewDocs + plan.NewFiles + plan.NewArtifacts
+			s.PendingItems = plan.NewInstructions + plan.NewDocs + plan.NewFiles + plan.NewArtifacts + plan.NewChats
 			s.ArtifactsPending = plan.NewArtifacts
+			s.ChatsPending = plan.NewChats
 			s.SkillsPending = plan.NewSkills
 			s.PendingItems += plan.NewSkills
 			s.Failed = plan.RetryFailed
@@ -739,6 +785,14 @@ func (a *App) Status() (Status, error) {
 				s.ArtifactsSent++
 			}
 		}
+		for _, it := range ps.Chats {
+			if it.Status == store.StatusDone {
+				s.ChatsSent++
+			}
+		}
+	}
+	if s.ChatsInProjects, err = a.chatsInSelectedProjects(sel); err != nil {
+		return s, err
 	}
 	settings, err := a.st.LoadSettings()
 	if err != nil {
@@ -750,7 +804,9 @@ func (a *App) Status() (Status, error) {
 	if !settings.MemorySentAt.IsZero() {
 		s.MemorySentAt = settings.MemorySentAt.Format(time.RFC3339)
 	}
-	s.MemoryPending, _ = migrate.MemoryPending(a.st)
+	if !settings.SkipMemory {
+		s.MemoryPending, _ = migrate.MemoryPending(a.st)
+	}
 	if !settings.LastSyncAt.IsZero() {
 		s.LastSyncAt = settings.LastSyncAt.Format(time.RFC3339)
 		s.LastSyncNewProjects, s.LastSyncChangedProjects = settings.LastSyncNewProjects, settings.LastSyncChangedProjects
@@ -852,7 +908,7 @@ func (a *App) SyncChanges() (SyncOutcome, error) {
 	settings.LastSyncAt = time.Now().UTC()
 	settings.LastSyncNewProjects, settings.LastSyncChangedProjects = p.ProjectsNew, p.ProjectsRead-p.ProjectsNew
 	settings.LastSyncChats, settings.LastSyncArtifacts = p.ChatsRead, p.ArtifactsNew
-	settings.LastSyncSent = r.CreatedProjects + r.Instructions + r.Docs + r.Files + r.Artifacts + r.Skills
+	settings.LastSyncSent = r.CreatedProjects + r.Instructions + r.Docs + r.Files + r.Artifacts + r.Chats + r.Skills
 	return out, a.st.SaveSettings(settings)
 }
 

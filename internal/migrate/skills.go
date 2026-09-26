@@ -52,8 +52,13 @@ func pullSkills(ctx context.Context, api API, st *store.Store, org string, opts 
 
 // pushSkills uploads each pulled skill once. A skill whose name already
 // exists in the target (for example uploaded by hand) is adopted as sent
-// rather than uploaded again, since uploads never overwrite.
+// rather than uploaded again, since uploads never overwrite. Nothing is
+// uploaded while the user has skills switched off.
 func (r *pushRun) pushSkills() error {
+	settings, err := r.st.LoadSettings()
+	if err != nil || settings.SkipSkills {
+		return err
+	}
 	skills, err := r.st.ListSkills()
 	if err != nil || len(skills) == 0 {
 		return err

@@ -8,3 +8,4 @@ frontend/wailsjs/
 .claude/
 frontend/package.json.md5
 .private/
+.playwright-mcp/

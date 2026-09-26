@@ -61,7 +61,11 @@ func Verify(ctx context.Context, api API, st *store.Store, state *store.State, o
 		return nil, err
 	}
 	var rows []VerifyRow
-	arts, err := artifactsByProject(st)
+	arts, err := artifactsToSend(st)
+	if err != nil {
+		return nil, err
+	}
+	chats, err := transcriptsToSend(st)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +83,16 @@ func Verify(ctx context.Context, api API, st *store.Store, state *store.State, o
 		if row.WantDocs, row.WantFiles, err = expected(st, p.UUID, opts); err != nil {
 			return rows, err
 		}
-		row.WantDocs += len(arts[p.UUID]) // artifacts are added as docs
+		wantArts := len(arts[p.UUID]) // artifacts are added as docs
+		if arts == nil && ps != nil {
+			wantArts = countDone(ps.Artifacts) // sent before the user switched artifacts off
+		}
+		row.WantDocs += wantArts
+		wantChats := len(chats[p.UUID]) // and so are chat transcripts, when chosen
+		if wantChats == 0 && ps != nil {
+			wantChats = countDone(ps.Chats) // sent before the user switched chats off
+		}
+		row.WantDocs += wantChats
 		if !pushed {
 			row.Error = "project not created in target"
 			if ps != nil && ps.Error != "" {
@@ -102,12 +115,17 @@ func Verify(ctx context.Context, api API, st *store.Store, state *store.State, o
 			row.GotDocs, row.GotFiles = got.DocsCount, got.FilesCount
 			row.OK = row.GotDocs == row.WantDocs && row.GotFiles == row.WantFiles
 			// If the only difference is artifacts not sent yet, say so.
-			unsent := len(arts[p.UUID]) - countDone(ps.Artifacts)
+			unsentArts := wantArts - countDone(ps.Artifacts)
+			unsent := unsentArts + wantChats - countDone(ps.Chats)
 			if !row.OK && unsent > 0 && row.GotDocs == row.WantDocs-unsent && row.GotFiles == row.WantFiles {
 				row.Waiting = unsent
-				row.Error = fmt.Sprintf("%d artifacts not sent yet", unsent)
-				if unsent == 1 {
+				switch {
+				case unsent != unsentArts:
+					row.Error = fmt.Sprintf("%d artifacts or chats not sent yet", unsent)
+				case unsent == 1:
 					row.Error = "1 artifact not sent yet"
+				default:
+					row.Error = fmt.Sprintf("%d artifacts not sent yet", unsent)
 				}
 			}
 		}

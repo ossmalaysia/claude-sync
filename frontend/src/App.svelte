@@ -4,14 +4,17 @@
   import { ClipboardSetText, EventsOn } from '../wailsjs/runtime/runtime.js';
   import Select from './views/Select.svelte';
   import Notice from './views/Notice.svelte';
+  import WhatToCopy from './views/WhatToCopy.svelte';
+  import Where from './views/Where.svelte';
   import logo from './assets/logo.png';
   import { pullProgressText } from './lib/format.js';
-  import { artifactLine, lastSyncLine, memoryLine, nextButton, selectionLine, skillLine, progress, pullLine, pushLine, verifyLine } from './lib/status.js';
+  import { artifactLine, chatLine, lastSyncLine, memoryLine, nextButton, selectionLine, skillLine, progress, pullLine, pushLine, verifyLine } from './lib/status.js';
 
   // Everything shown comes from Status(), which the backend rebuilds from the
   // files on disk every poll. Nothing here depends on what was clicked before.
   let status = $state(null);
-  let view = $state('home'); // 'home' | 'select'
+  let view = $state('home'); // 'home' | 'select' | 'where' | 'copy'
+  let selectBack = 'home'; // where Choose projects returns to
   let busy = $state(''); // action started from this window
   let error = $state('');
   let notice = $state('');
@@ -85,7 +88,10 @@
         // Bring the results into view; they sit below the step list.
         setTimeout(() => document.getElementById('verify-results')?.scrollIntoView({ behavior: 'smooth' }), 50);
       }),
-    select: () => (view = 'select'),
+    select: () => {
+      selectBack = 'home';
+      view = 'select';
+    },
     sync: () =>
       run('sync', async () => {
         const out = await Go.SyncChanges();
@@ -101,6 +107,7 @@
           sent: 'Memory sent. claude.ai is adding it to the target account’s memory; it appears there within a few minutes.',
           unchanged: 'Memory was already sent and has not changed.',
           empty: 'There is no memory to send. Pull first.',
+          skipped: 'Memory is switched off in Settings, so it was not sent.',
           needs_login: 'The target login expired or its window was closed. Press Send again and log in to the window that opens.',
         }[out.status];
       }),
@@ -122,6 +129,13 @@
     if (showMemory) memory = await Go.MemoryText();
   }
 
+  // The "What to copy" page, opened from Settings or from a row's Change link.
+  const openSettings = () => (view = 'copy');
+  function chooseFromSettings() {
+    selectBack = 'copy';
+    view = 'select';
+  }
+
   const btn = $derived(status ? nextButton(status) : null);
   const locked = $derived(!!status?.job || !!busy);
   const orgLabel = (a) => a.org_name || (a.org ? `Org ${a.org.slice(0, 8)}` : 'Not connected');
@@ -138,7 +152,7 @@
       select: s.selected > 0 ? 'done' : 'todo',
       push: pushDone ? 'done' : s.pushed || s.job === 'push' ? 'active' : 'todo',
       verify: s.verified_at && !s.verify_stale && s.verify_ok === s.verify_total ? 'done' : 'todo',
-      artifacts: !s.artifacts ? 'todo' : s.artifacts_pending ? (s.artifacts_sent ? 'active' : 'todo') : 'done',
+      artifacts: !s.artifacts || s.skip_artifacts ? 'todo' : s.artifacts_pending ? (s.artifacts_sent ? 'active' : 'todo') : 'done',
     };
   });
 </script>
@@ -150,13 +164,24 @@
       <h1>Claude Sync</h1>
       <p>Move Projects from one claude.ai account to another</p>
     </div>
+    {#if status?.terms_accepted && status.pull_complete}
+      <button class="settings" onclick={openSettings} aria-pressed={view === 'copy'}>Settings</button>
+    {/if}
   </header>
 
   <main>
     {#if status && !status.terms_accepted}
       <Notice done={refresh} />
+    {:else if view === 'where'}
+      <Where done={() => { view = 'home'; refresh(); }} />
     {:else if view === 'select'}
-      <Select done={() => { view = 'home'; refresh(); }} />
+      <Select done={() => { view = selectBack; refresh(); }} />
+    {:else if status && (view === 'copy' || (status.pull_complete && !status.copy_reviewed))}
+      <WhatToCopy
+        cancellable={status.copy_reviewed}
+        onChooseProjects={chooseFromSettings}
+        done={() => { view = 'home'; refresh(); }}
+      />
     {:else if status}
       <section class="transfer" aria-label="Accounts">
         <div class="account">
@@ -225,25 +250,42 @@
         </li>
         <li class={rowState.select}>
           <span class="mark" aria-hidden="true"></span>
-          <div><b>Choose projects</b><span>{selectionLine(status)}</span></div>
+          <div>
+            <b>Choose projects</b><span>{selectionLine(status)}</span>
+            {#if status.personal_skipped}<button class="link" onclick={openSettings}>Change</button>{/if}
+          </div>
           <button onclick={actions.select} disabled={locked || !status.projects}>Edit</button>
         </li>
         <li class={rowState.push}>
           <span class="mark" aria-hidden="true"></span>
           <div>
             <b>Send to target</b><span>{pushLine(status)}</span>
+            {#if status.pushed}<button class="link" onclick={() => (view = 'where')}>Where to find everything in {status.target.org_name || 'the target'}</button>{/if}
             {#if status.skipped}<span class="muted">{status.skipped} files over 30 MB are skipped.</span>{/if}
           </div>
           <button onclick={actions.push} disabled={locked || !status.target.org || !status.pull_complete || rowState.push === 'done'}>{rowState.push === 'done' ? 'Sent' : status.failed && !status.pending_projects && !status.pending_items ? 'Retry' : status.pushed ? 'Resume' : 'Start'}</button>
         </li>
         <li class={rowState.artifacts}>
           <span class="mark" aria-hidden="true"></span>
-          <div><b>Artifacts from chats</b><span>{artifactLine(status)}</span></div>
+          <div>
+            <b>Artifacts from chats</b><span>{artifactLine(status)}</span>
+            {#if status.skip_artifacts}<button class="link" onclick={openSettings}>Change</button>{/if}
+          </div>
           <button onclick={openExport} disabled={!status.artifacts}>Open folder</button>
         </li>
-        <li class={!status.skills ? 'todo' : status.skills_pending || status.skills_failed ? 'active' : 'done'}>
+        <li class={!status.chats_in_projects || status.chat_choice !== 'include' ? 'todo' : !status.chats_pending ? 'done' : 'active'}>
           <span class="mark" aria-hidden="true"></span>
-          <div><b>Skills</b><span>{skillLine(status)}</span></div>
+          <div>
+            <b>Chats as documents</b><span>{chatLine(status)}</span>
+            {#if status.chat_choice !== 'include' && status.chats_in_projects}<button class="link" onclick={openSettings}>Change</button>{/if}
+          </div>
+        </li>
+        <li class={!status.skills || status.skip_skills ? 'todo' : status.skills_pending || status.skills_failed ? 'active' : 'done'}>
+          <span class="mark" aria-hidden="true"></span>
+          <div>
+            <b>Skills</b><span>{skillLine(status)}</span>
+            {#if status.skip_skills}<button class="link" onclick={openSettings}>Change</button>{/if}
+          </div>
           <span></span>
         </li>
         <li class={rowState.verify}>
@@ -251,12 +293,15 @@
           <div><b>Check the target</b><span>{verifyLine(status)}</span></div>
           <button onclick={actions.verify} disabled={locked || !status.pushed}>Verify</button>
         </li>
-        <li class={status.memory_sent_at && !status.memory_pending ? 'done' : 'todo'}>
+        <li class={status.memory_sent_at && !status.memory_pending && !status.skip_memory ? 'done' : 'todo'}>
           <span class="mark" aria-hidden="true"></span>
-          <div><b>Memory</b><span>{memoryLine(status)}</span></div>
+          <div>
+            <b>Memory</b><span>{memoryLine(status)}</span>
+            {#if status.skip_memory}<button class="link" onclick={openSettings}>Change</button>{/if}
+          </div>
           <div class="actions">
             <button onclick={toggleMemory} disabled={!status.pull_complete && !status.memory_sent_at}>{showMemory ? 'Hide' : 'Show'}</button>
-            <button onclick={actions.memory} disabled={locked || !status.memory_pending || !status.target.org}>{status.memory_sent_at && status.memory_pending ? 'Send again' : 'Send'}</button>
+            <button onclick={actions.memory} disabled={locked || status.skip_memory || !status.memory_pending || !status.target.org}>{status.memory_sent_at && status.memory_pending ? 'Send again' : 'Send'}</button>
           </div>
         </li>
       </ol>

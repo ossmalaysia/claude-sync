@@ -34,6 +34,7 @@ type ProjectState struct {
 	Docs         map[string]*ItemState `json:"docs"`
 	Files        map[string]*ItemState `json:"files"`
 	Artifacts    map[string]*ItemState `json:"artifacts,omitempty"` // key "<chat uuid>/<artifact id>"
+	Chats        map[string]*ItemState `json:"chats,omitempty"`     // chat transcripts, by chat uuid
 }
 
 // State is push progress keyed by SOURCE uuids.
@@ -61,6 +62,9 @@ func (s *State) Project(src string) *ProjectState {
 	}
 	if ps.Artifacts == nil {
 		ps.Artifacts = map[string]*ItemState{}
+	}
+	if ps.Chats == nil {
+		ps.Chats = map[string]*ItemState{}
 	}
 	return ps
 }

@@ -17,6 +17,7 @@ type PushResult struct {
 	Docs            int       `json:"docs"`
 	Files           int       `json:"files"`
 	Artifacts       int       `json:"artifacts"`
+	Chats           int       `json:"chats"`   // chat transcripts added as docs
 	Touched         []string  `json:"touched"` // source projects that received any write
 	Skills          int       `json:"skills"`  // skills uploaded
 	Failed          []Failure `json:"failed"`
@@ -34,7 +35,8 @@ type pushRun struct {
 	project string // name of the project being pushed, for messages
 	current string // uuid of the project being pushed
 	touched map[string]bool
-	arts    map[string][]artifactRef
+	arts    map[string][]artifactRef      // nil when artifacts are switched off
+	chats   map[string][]store.ChatRecord // transcripts to send, by project; nil unless chosen
 	// unclaimed lists target projects by name that no source project is
 	// mapped to yet, loaded on first need.
 	unclaimed map[string][]string
@@ -60,7 +62,10 @@ func Push(ctx context.Context, api API, st *store.Store, state *store.State, org
 	}
 	state.TargetOrg = org
 	r := &pushRun{ctx: ctx, api: api, st: st, state: state, org: org, opts: opts, report: report, res: &res}
-	if r.arts, err = artifactsByProject(st); err != nil {
+	if r.arts, err = artifactsToSend(st); err != nil {
+		return res, err
+	}
+	if r.chats, err = transcriptsToSend(st); err != nil {
 		return res, err
 	}
 	if err := r.save(); err != nil {
@@ -252,6 +257,29 @@ func (r *pushRun) pushProject(p store.ProjectMeta) error {
 		}
 		if it.Status == store.StatusDone {
 			r.res.Artifacts++
+		}
+	}
+
+	// Chat transcripts, when the user chose to copy chats.
+	for _, c := range r.chats[p.UUID] {
+		it := ps.Chats[c.UUID]
+		if it != nil && it.Status == store.StatusDone {
+			continue
+		}
+		if it == nil {
+			it = &store.ItemState{}
+			ps.Chats[c.UUID] = it
+		}
+		c := c
+		err := r.item("chat "+c.TranscriptAs, it, contentSHA(c.Transcript), func() (string, error) {
+			doc, err := r.api.CreateDoc(r.ctx, r.org, ps.Target, c.TranscriptAs, c.Transcript)
+			return doc.UUID, err
+		})
+		if err != nil {
+			return err
+		}
+		if it.Status == store.StatusDone {
+			r.res.Chats++
 		}
 	}
 	return nil

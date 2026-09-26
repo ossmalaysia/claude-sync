@@ -5,6 +5,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/ossmalaysia/claude-sync/internal/store"
 )
 
 func TestRunUsageErrors(t *testing.T) {
@@ -26,5 +28,27 @@ func TestRunUsageErrors(t *testing.T) {
 		if !strings.Contains(errOut.String(), c.want) {
 			t.Errorf("%v: stderr %q missing %q", c.args, errOut.String(), c.want)
 		}
+	}
+}
+
+type memoryAPI struct{ sent int }
+
+func (m *memoryAPI) ImportMemory(context.Context, string, string) error { m.sent++; return nil }
+
+// Memory switched off in "What to copy" is not sent by the CLI either.
+func TestSyncMemoryHonoursSwitch(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.SaveMemory("**Work context**")
+	st.SaveSettings(store.Settings{SkipMemory: true})
+	api := &memoryAPI{}
+	if res, err := syncMemory(context.Background(), api, st, "org"); err != nil || res != "skipped" || api.sent != 0 {
+		t.Fatalf("res=%q err=%v sent=%d", res, err, api.sent)
+	}
+	st.SaveSettings(store.Settings{})
+	if res, err := syncMemory(context.Background(), api, st, "org"); err != nil || res != "sent" || api.sent != 1 {
+		t.Fatalf("res=%q err=%v sent=%d", res, err, api.sent)
 	}
 }

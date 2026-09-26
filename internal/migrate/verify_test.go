@@ -251,3 +251,28 @@ func TestPushClearsCheckOfProjectsItChanges(t *testing.T) {
 		t.Fatal("check of an untouched project must stay")
 	}
 }
+
+// With artifacts switched off, a project expects only the artifacts sent
+// before, so it is not reported as waiting on the rest.
+func TestVerifyIgnoresArtifactsSwitchedOff(t *testing.T) {
+	ctx := context.Background()
+	api := newFakeAPI()
+	tp, _ := api.CreateProject(ctx, "org", claudeapi.NewProject{Name: "A"})
+	api.CreateDoc(ctx, "org", tp.UUID, "a.md", "x")
+	api.CreateDoc(ctx, "org", tp.UUID, "Artifact - b.md", "y") // sent before the switch
+	st := newTestStore(t)
+	seedProject(t, st, 0, "s1", "A", "", []seedDoc{{"d1", "a.md", "x"}}, nil)
+	st.SaveChat(store.ChatRecord{UUID: "c1", ProjectUUID: "s1", Artifacts: []store.ArtifactRecord{
+		{ID: "artifact:b", FileName: "Artifact - b.md", Content: "y"},
+		{ID: "artifact:c", FileName: "Artifact - c.md", Content: "z"}}})
+	st.SaveSelection(map[string]bool{"s1": true})
+	setSettings(t, st, func(s *store.Settings) { s.SkipArtifacts = true })
+	state := &store.State{TargetOrg: "org"}
+	ps := state.Project("s1")
+	ps.Target = tp.UUID
+	ps.Artifacts["c1/artifact:b"] = &store.ItemState{Status: store.StatusDone}
+	rows, err := Verify(ctx, api, st, state, "org", testOpts(), nil, nil)
+	if err != nil || len(rows) != 1 || !rows[0].OK || rows[0].WantDocs != 2 || rows[0].Waiting != 0 {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+}

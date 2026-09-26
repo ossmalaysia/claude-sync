@@ -104,3 +104,19 @@ func TestPullWithoutSkillsFeature(t *testing.T) {
 		t.Fatalf("res=%+v err=%v", res, err)
 	}
 }
+
+// Skills switched off on "What to copy" are neither planned nor uploaded.
+func TestPushAndPlanLeaveSkillsOutWhenSwitchedOff(t *testing.T) {
+	st := newTestStore(t)
+	st.SaveSkill(store.SkillMeta{ID: "skill_q", Name: "quotation", UpdatedAt: "t1"}, []byte("PK-q"))
+	setSettings(t, st, func(s *store.Settings) { s.SkipSkills = true })
+	target := newFakeAPI()
+	state, _ := st.LoadState()
+	if plan, err := Plan(st, map[string]bool{}, state, "org", testOpts()); err != nil || plan.NewSkills != 0 {
+		t.Fatalf("plan=%+v err=%v", plan, err)
+	}
+	res, err := Push(context.Background(), target, st, state, "org", map[string]bool{}, testOpts(), nil)
+	if err != nil || res.Skills != 0 || target.count("UploadSkill") != 0 || target.count("ListSkills") != 0 {
+		t.Fatalf("res=%+v err=%v uploads=%d", res, err, target.count("UploadSkill"))
+	}
+}

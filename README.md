@@ -33,6 +33,10 @@ export leaves out knowledge-file contents. Claude Sync copies them for you:
 - **Your own skills**, with every file they contain (built-in Anthropic skills
   are not copied)
 - **Memory**, sent through claude.ai's memory import
+- **Chats as documents** (optional, off by default): each chat in a Project is
+  added to that Project as a transcript
+- **What to copy**: after the first download, one page with a switch for each
+  kind of content; reopen it any time from **Settings**
 - **Keeps up**: *Scan & sync changes* sends only what is new since last time
 
 > [!IMPORTANT]
@@ -49,8 +53,9 @@ sees your password. Then:
 
 1. **Download from source.** Everything is copied to a folder on your computer.
    Your old account is only read, never changed.
-2. **Choose projects.** Tick what to move. Projects named `Personal:…`,
-   `Family:…` or `Travel…` start unticked.
+2. **Choose what to copy.** Switch artifacts, chats, skills, memory and
+   personal projects on or off, and tick the Projects to move. Projects named
+   `Personal:…`, `Family:…` or `Travel…` start unticked.
 3. **Send to target.** Projects are created one request at a time. Existing
    content in the target is never edited or deleted.
 4. **Check the target.** Doc and file counts are compared with your local copy.
@@ -122,9 +127,10 @@ once.
 
 ## Limitations
 
-- **Chats are not migrated.** claude.ai cannot recreate conversations. Their
-  artifacts are recovered instead: those from Project chats are added to the
-  matching Project; all of them are saved under `artifacts-export/` locally.
+- **Chats are not recreated as chats.** claude.ai cannot import conversations.
+  Their artifacts are recovered instead, and chats can be copied as documents:
+  those from Project chats are added to the matching Project; artifacts are
+  all saved under `artifacts-export/` locally.
 - Files that Claude produced by running code (for example a generated `.docx`
   or `.pptx`) and published artifact pages are not recovered.
 - **Memory** is merged by claude.ai into the target's memory; it is sent once per

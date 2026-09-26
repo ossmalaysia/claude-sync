@@ -171,6 +171,16 @@ type artifactRef struct {
 
 func (r artifactRef) key() string { return r.Chat + "/" + r.ID }
 
+// artifactsToSend returns artifactsByProject, or nil when the user switched
+// artifacts off.
+func artifactsToSend(st *store.Store) (map[string][]artifactRef, error) {
+	settings, err := st.LoadSettings()
+	if err != nil || settings.SkipArtifacts {
+		return nil, err
+	}
+	return artifactsByProject(st)
+}
+
 // artifactsByProject groups the saved artifacts by source project uuid.
 // Artifacts from chats outside a project are not included.
 func artifactsByProject(st *store.Store) (map[string][]artifactRef, error) {

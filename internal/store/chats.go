@@ -25,8 +25,13 @@ type ChatRecord struct {
 	UUID        string           `json:"uuid"`
 	Name        string           `json:"name"`
 	ProjectUUID string           `json:"project_uuid"`
+	CreatedAt   string           `json:"created_at,omitempty"`
 	UpdatedAt   string           `json:"updated_at"`
 	Artifacts   []ArtifactRecord `json:"artifacts"`
+	// Transcript is the conversation as Markdown; empty for chats pulled by
+	// versions before 0.1.3, which are read again once to fill it in.
+	Transcript   string `json:"transcript,omitempty"`
+	TranscriptAs string `json:"transcript_as,omitempty"` // document name in the target
 }
 
 func (s *Store) SaveChat(c ChatRecord) error {

@@ -291,7 +291,7 @@ func pullChats(ctx context.Context, api API, st *store.Store, org string, opts O
 		if err != nil {
 			return err
 		}
-		if ok && saved.UpdatedAt == c.UpdatedAt {
+		if ok && saved.UpdatedAt == c.UpdatedAt && saved.Transcript != "" {
 			res.Chats++
 			res.Artifacts += len(saved.Artifacts)
 			if saved.ProjectUUID == "" {
@@ -320,7 +320,9 @@ func pullChats(ctx context.Context, api API, st *store.Store, org string, opts O
 			report.emit(Event{Stage: "pull", Level: "warn", Message: fail.Item + ": " + fail.Error})
 			continue
 		}
-		rec := store.ChatRecord{UUID: c.UUID, Name: c.Name, ProjectUUID: c.ProjectUUID, UpdatedAt: c.UpdatedAt, Artifacts: ExtractArtifacts(Branch(detail))}
+		branch := Branch(detail)
+		rec := store.ChatRecord{UUID: c.UUID, Name: c.Name, ProjectUUID: c.ProjectUUID, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+			Artifacts: ExtractArtifacts(branch), Transcript: Transcript(c, branch), TranscriptAs: TranscriptFileName(c)}
 		folder := projectName[c.ProjectUUID]
 		if folder == "" {
 			folder = "No project"

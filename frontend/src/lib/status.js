@@ -6,6 +6,14 @@ function plural(n, word) {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
+// off is the wording for a row whose switch is off in "What to copy".
+const off = 'Not copied. Turn it on in Settings.';
+
+// offLine tells what was sent before the switch was turned off, if anything.
+function offLine(head, sent) {
+  return sent ? `${head} ${sent} sent earlier; the rest are not copied. Turn it on in Settings.` : `${head} ${off}`;
+}
+
 function when(iso) {
   if (!iso) return '';
   const d = new Date(iso);
@@ -123,6 +131,7 @@ export function progress(s) {
 export function artifactLine(s) {
   if (!s.chats) return 'Not read yet. Pull reads your chats for artifacts.';
   if (!s.artifacts) return `No artifacts found in ${s.chats} chats.`;
+  if (s.skip_artifacts) return offLine(`${s.artifacts} found in ${s.chats} chats.`, s.artifacts_sent);
   const parts = [`${s.artifacts_sent} sent`];
   if (s.artifacts_pending) parts.push(`${s.artifacts_pending} waiting`);
   if (s.artifacts_no_project) parts.push(`${s.artifacts_no_project} kept locally (chats outside a project)`);
@@ -133,6 +142,7 @@ export function artifactLine(s) {
 // memory import once, and again only when a later pull changed it.
 export function memoryLine(s) {
   if (!s.pull_complete && !s.memory_pending && !s.memory_sent_at) return 'Pull first to read your memory.';
+  if (s.skip_memory) return s.memory_sent_at ? `Sent on ${when(s.memory_sent_at)}. Changes are not copied. Turn it on in Settings.` : off;
   if (s.memory_pending && s.memory_sent_at) return `Changed since it was sent on ${when(s.memory_sent_at)}. Send again to update.`;
   if (s.memory_pending) return 'Ready to send. claude.ai merges it into the target account’s memory.';
   if (s.memory_sent_at) return `Sent on ${when(s.memory_sent_at)}. claude.ai adds it to memory in the background.`;
@@ -155,7 +165,10 @@ export function lastSyncLine(s) {
 
 export function selectionLine(s) {
   if (!s.projects) return 'Pull first to see your projects.';
-  return `${s.selected} of ${s.projects} projects selected`;
+  const line = `${s.selected} of ${s.projects} projects selected`;
+  if (s.personal_skipped) return `${line}, ${s.personal_skipped} personal left out`;
+  if (s.personal_projects && s.personal_choice === 'include') return `${line}, personal projects included`;
+  return line;
 }
 
 // skillLine describes personal skills: only skills the user made or added are
@@ -164,7 +177,19 @@ export function skillLine(s) {
   if (!s.skills && !s.pull_complete) return 'Pull first. Only your own skills are copied, not the built-in ones.';
   if (!s.skills) return 'No personal skills found. Built-in skills are not copied.';
   const found = `${plural(s.skills, 'personal skill')} found.`;
+  if (s.skip_skills) return offLine(found, s.skills_sent);
   if (s.skills_failed) return `${found} ${s.skills_sent} sent, ${s.skills_failed} failed. Retry sends ${s.skills_failed === 1 ? 'it' : 'them'} again.`;
   if (!s.skills_pending) return `${found} ${s.skills_sent ? 'All sent.' : 'None sent yet.'}`;
   return `${found} ${s.skills_sent} sent, ${s.skills_pending} waiting.`;
+}
+
+// chatLine describes chat transcripts: chats cannot be recreated, but each
+// can be added to its project as a document when switched on in Settings.
+export function chatLine(s) {
+  const n = s.chats_in_projects || 0;
+  if (!n) return 'No chats in the selected projects.';
+  const found = `${plural(n, 'chat')} in the selected projects.`;
+  if (s.chat_choice !== 'include') return offLine(found, s.chats_sent);
+  if (s.chats_pending) return `${found} ${s.chats_sent} sent as documents, ${s.chats_pending} waiting.`;
+  return `${found} All sent as documents.`;
 }

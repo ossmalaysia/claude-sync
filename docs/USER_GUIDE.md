@@ -1,8 +1,9 @@
 # Claude Sync user guide
 
 Claude Sync copies your claude.ai Projects, the artifacts from your chats, your
-own skills, and your memory from one account to another. For example, from a personal account
-to your company's team account. This guide takes about ten minutes the first
+own skills, and your memory from one account to another, and can copy your chats
+as documents. For example, from a personal account to your company's team
+account. This guide takes about ten minutes the first
 time.
 
 > Claude Sync is an independent open-source tool, not an Anthropic product. It
@@ -26,10 +27,12 @@ Download the latest release from
 
 ![First launch](images/welcome.png)
 
-The first time you open Claude Sync, it shows a short notice: what the app does,
+The first time you open Claude Sync, it shows a short notice, **Before you
+start**: what the app does,
 that it only adds to the target account and never edits or deletes, and that you
 are responsible for what you copy there (for example, your employer's rules for a
-company account). Tick the box and click **Continue**.
+company account). Tick the box and click **Continue**. You choose what to copy
+later, after the first download.
 
 1. Click **Connect source account**. A Chrome (or Edge) window opens on claude.ai.
 2. Log in to the account you are moving **from**, as you normally would.
@@ -43,7 +46,7 @@ Click **Start pull**. Claude Sync reads your source account (it never changes
 it) and saves a copy on your computer:
 
 - every Project with its instructions, docs and files
-- the artifacts from your chats, at their final version
+- your chats, and the artifacts from them at their final version
 - your own skills, with every file they contain (built-in Anthropic skills are
   left out, since every account already has them)
 - your memory
@@ -54,11 +57,32 @@ where it stopped.
 
 ![Reading chats, with progress and time left](images/syncing.png)
 
-## 4. Choose projects
+## 4. Choose what to copy
 
-Click **Edit** next to **Choose projects** and tick the Projects to move.
-Projects whose names start with `Personal:`, `Family:` or `Travel` are unticked
-by default. That matters when the target is a company account.
+When the first download finishes, Claude Sync opens **What to copy**. It shows
+what it found in your source account, with real counts, and one switch for each
+kind of content:
+
+| What | Default | What it does |
+|---|---|---|
+| Projects | Always copied | Shows how many projects are selected. **Choose projects** opens the list, where you tick the Projects to move. |
+| Artifacts from chats | On | Adds each artifact from a chat in a Project to that Project as a document. |
+| Chats as documents | Off | Adds each chat in a Project to that Project as a document: what you and Claude wrote, without hidden reasoning. |
+| Your own skills | On | Uploads your skills with all their files. |
+| Memory | On | Sends your memory to the target account. |
+| Personal projects | Off | Projects whose names start with `Personal:`, `Family:` or `Travel`. The page lists their names. |
+
+Chats are off by default because they can be long and often hold things you
+would not want in a shared account. Personal projects are off for the same
+reason: the target is often a company account. Turn either on if you want them.
+
+Click **Save**. You must save this page once before Claude Sync sends anything.
+
+To change your choices later, click **Settings** at the top of the app. It
+opens the same page. Turning something off stops it being sent from then on;
+nothing already in the target account is removed. The home screen always shows
+what is left out, for example "16 personal left out" next to **Choose
+projects**, or "Not copied" on a row you switched off, with a way to change it.
 
 ## 5. Connect the account you are moving **to**, then send
 
@@ -85,16 +109,38 @@ by default. That matters when the target is a company account.
 If you keep using the old account, click **Scan & sync changes** now and then.
 It reads only what is new or changed since last time (usually under a minute),
 sends it, and checks the Projects it changed. The line under the button says
-what the last sync found and sent.
+what the last sync found and sent. It follows your choices in **What to copy**.
 
-## Where things are, and what is not copied
+## Where to find everything
+
+After a send, the **Send to target** row has a link, **Where to find
+everything**. It opens a screen that shows where each kind of content is in the
+target account, using names from your own migration. Its links open in your
+default browser, so that browser must be signed in to the target account. If a
+project does not open, switch to the target account in claude.ai and try again.
+
+In the target claude.ai account:
+
+- **Projects** are under Projects, with the same names as before.
+- **Artifacts** are documents in their Project's knowledge, named
+  "Artifact - …".
+- **Chats**, if you turned them on, are documents in their Project's knowledge,
+  named "Chat - title (date)". Ask Claude about them in a new chat in the
+  Project.
+- **Skills** are under Customize, Skills.
+- **Memory** is under Settings, Memory. claude.ai merges it in the background,
+  so it can take a few minutes to appear.
+
+Artifacts and chats from chats outside any Project have no Project to go to, so
+they stay on this computer. Click **Open folder** next to *Artifacts from chats*
+to see the artifacts.
+
+## What is not copied
 
 - Your downloaded copy is in `~/Library/Application Support/claude-sync` (macOS)
-  or `%AppData%\claude-sync` (Windows). **Open folder** next to *Artifacts from
-  chats* shows readable copies of every artifact.
-- **Chats** cannot be recreated in another account. Their artifacts are copied
-  instead: artifacts from Project chats are added to the matching Project, and
-  the rest stay in the local folder.
+  or `%AppData%\claude-sync` (Windows).
+- A chat cannot be recreated as a chat in another account. With **Chats as
+  documents** on, chats in a Project are copied as documents instead.
 - **Images** in Project knowledge are copied as full-resolution WebP previews
   (claude.ai keeps no original).
 - Published artifact pages, and files that Claude produced by running code (for
@@ -110,6 +156,7 @@ what the last sync found and sent.
 | "No Chrome, Edge or Chromium found" | Install Google Chrome, or set `CLAUDE_SYNC_BROWSER` to another Chromium-based browser. |
 | "login expired" or a browser window closed | Click the same button again and log in to the window that opens. Progress is kept. |
 | Check the target says projects "only need their artifacts sent" | Those Projects are not selected, or a push has not run since the last pull. Choose them and push. |
+| Sending says "review What to copy before sending" | Click **Settings**, check the switches and click **Save**. |
 | You want a trial run without touching your real data folder | Start the app with `CLAUDE_SYNC_DATA=/some/empty/folder`. |
 
 Found a problem? Please open an issue:

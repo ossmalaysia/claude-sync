@@ -244,7 +244,7 @@ func dispatch(ctx context.Context, cmd string, st *store.Store, org, account str
 	case "smoke":
 		return runSmoke(ctx, c, org, out)
 	case "memory":
-		res, err := migrate.SyncMemory(ctx, c, st, org)
+		res, err := syncMemory(ctx, c, st, org)
 		if err != nil {
 			return err
 		}
@@ -252,9 +252,23 @@ func dispatch(ctx context.Context, cmd string, st *store.Store, org, account str
 			"sent":      "sent; claude.ai adds it to memory in the background",
 			"unchanged": "already sent (memory.md has not changed)",
 			"empty":     "memory.md is empty; run pull first",
+			"skipped":   "not sent; memory is switched off in What to copy",
 		}[res])
 	}
 	return nil
+}
+
+// syncMemory sends memory like migrate.SyncMemory, but reports "skipped"
+// without sending while memory is switched off in "What to copy".
+func syncMemory(ctx context.Context, api migrate.MemoryAPI, st *store.Store, org string) (string, error) {
+	settings, err := st.LoadSettings()
+	if err != nil {
+		return "", err
+	}
+	if settings.SkipMemory {
+		return "skipped", nil
+	}
+	return migrate.SyncMemory(ctx, api, st, org)
 }
 
 // runSync is the CLI's "Scan & sync": a delta pull (only new or changed
@@ -327,10 +341,10 @@ func runSync(ctx context.Context, st *store.Store, from, to string, out io.Write
 	if err != nil {
 		return fmt.Errorf("send: %w", err)
 	}
-	sent := res.CreatedProjects + res.Instructions + res.Docs + res.Files + res.Artifacts + res.Skills
-	fmt.Fprintf(out, "send: %d projects (%d already in the target), %d instructions, %d docs, %d files, %d artifacts, %d skills; %d failed\n",
-		res.CreatedProjects, res.AdoptedProjects, res.Instructions, res.Docs, res.Files, res.Artifacts, res.Skills, len(res.Failed))
-	mem, err := migrate.SyncMemory(ctx, dc, st, to)
+	sent := res.CreatedProjects + res.Instructions + res.Docs + res.Files + res.Artifacts + res.Chats + res.Skills
+	fmt.Fprintf(out, "send: %d projects (%d already in the target), %d instructions, %d docs, %d files, %d artifacts, %d chats, %d skills; %d failed\n",
+		res.CreatedProjects, res.AdoptedProjects, res.Instructions, res.Docs, res.Files, res.Artifacts, res.Chats, res.Skills, len(res.Failed))
+	mem, err := syncMemory(ctx, dc, st, to)
 	if err != nil {
 		return fmt.Errorf("memory: %w", err)
 	}

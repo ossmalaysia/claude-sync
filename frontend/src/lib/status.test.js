@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { artifactLine, lastSyncLine, memoryLine, nextButton, selectionLine, skillLine, progress, pullLine, pushLine, timeLeft, verifyLine } from './status.js';
+import { artifactLine, chatLine, lastSyncLine, memoryLine, nextButton, selectionLine, skillLine, progress, pullLine, pushLine, timeLeft, verifyLine } from './status.js';
 
 const base = {
   source: { org: 's', org_name: 'Personal', saved_login: true },
@@ -75,6 +75,8 @@ describe('artifactLine', () => {
   it('none found', () => expect(artifactLine(s({ chats: 12, artifacts: 0 }))).toBe('No artifacts found in 12 chats.'));
   it('waiting', () => expect(artifactLine(a({}))).toBe('57 found in 300 chats. 0 sent, 50 waiting, 7 kept locally (chats outside a project).'));
   it('all sent', () => expect(artifactLine(a({ artifacts_sent: 50, artifacts_pending: 0 }))).toBe('57 found in 300 chats. 50 sent, 7 kept locally (chats outside a project).'));
+  it('switched off', () => expect(artifactLine(a({ skip_artifacts: true }))).toBe('57 found in 300 chats. Not copied. Turn it on in Settings.'));
+  it('switched off after some were sent', () => expect(artifactLine(a({ skip_artifacts: true, artifacts_sent: 20 }))).toBe('57 found in 300 chats. 20 sent earlier; the rest are not copied. Turn it on in Settings.'));
   it('no loose', () => expect(artifactLine(a({ artifacts_sent: 57, artifacts_pending: 0, artifacts_no_project: 0 }))).toBe('57 found in 300 chats. 57 sent.'));
 });
 
@@ -98,6 +100,9 @@ describe('memoryLine', () => {
   it('ready to send', () => expect(memoryLine(s({ memory_pending: true, memory_sent_at: '' }))).toBe('Ready to send. claude.ai merges it into the target account’s memory.'));
   it('changed since sent', () => expect(memoryLine(s({ memory_pending: true, memory_sent_at: '2026-09-25T00:20:00Z' }))).toMatch(/^Changed since it was sent on .+\. Send again to update\.$/));
   it('sent', () => expect(memoryLine(s({ memory_pending: false, memory_sent_at: '2026-09-25T00:20:00Z' }))).toMatch(/^Sent on .+\. claude\.ai adds it to memory in the background\.$/));
+  it('switched off', () => expect(memoryLine(s({ skip_memory: true, memory_pending: false, memory_sent_at: '' }))).toBe('Not copied. Turn it on in Settings.'));
+  it('switched off after it was sent', () => expect(memoryLine(s({ skip_memory: true, memory_pending: false, memory_sent_at: '2026-09-25T00:20:00Z' }))).toMatch(/^Sent on .+\. Changes are not copied\. Turn it on in Settings\.$/));
+  it('pull first even when switched off', () => expect(memoryLine(s({ skip_memory: true, pull_complete: false, pull_done: 0, pull_total: 0, memory_pending: false, memory_sent_at: '' }))).toBe('Pull first to read your memory.'));
 });
 
 describe('nextButton memory', () => {
@@ -120,6 +125,9 @@ describe('before the first pull', () => {
   const fresh = s({ pull_total: 0, pull_done: 0, pull_complete: false, projects: 0, selected: 0, pushed: 0, pending_projects: 0 });
   it('push line', () => expect(pushLine(fresh)).toBe('Pull first.'));
   it('selection line', () => expect(selectionLine(fresh)).toBe('Pull first to see your projects.'));
+  it('selection line, personal left out', () => expect(selectionLine(s({ personal_projects: 16, personal_skipped: 16, personal_choice: 'skip' }))).toBe('156 of 172 projects selected, 16 personal left out'));
+  it('selection line, personal included', () => expect(selectionLine(s({ personal_projects: 16, personal_skipped: 0, personal_choice: 'include' }))).toBe('156 of 172 projects selected, personal projects included'));
+  it('selection line, personal off but all picked by hand', () => expect(selectionLine(s({ personal_projects: 2, personal_skipped: 0, personal_choice: 'skip' }))).toBe('156 of 172 projects selected'));
   it('selection line after pull', () => expect(selectionLine(s({}))).toBe('156 of 172 projects selected'));
 });
 
@@ -129,5 +137,16 @@ describe('skillLine', () => {
   it('waiting', () => expect(skillLine(s({ skills: 5, skills_sent: 1, skills_pending: 4 }))).toBe('5 personal skills found. 1 sent, 4 waiting.'));
   it('failed', () => expect(skillLine(s({ skills: 15, skills_sent: 14, skills_failed: 1, skills_pending: 0 }))).toBe('15 personal skills found. 14 sent, 1 failed. Retry sends it again.'));
   it('a failed skill is not blamed on projects', () => expect(pushLine(s({ pushed: 3, pending_projects: 0, pending_items: 0, failed: 1, skills_failed: 1 }))).toMatch(/Everything is sent\.$/));
+  it('switched off', () => expect(skillLine(s({ skills: 5, skills_sent: 0, skills_pending: 0, skip_skills: true }))).toBe('5 personal skills found. Not copied. Turn it on in Settings.'));
+  it('switched off after some were sent', () => expect(skillLine(s({ skills: 5, skills_sent: 2, skills_pending: 0, skip_skills: true }))).toBe('5 personal skills found. 2 sent earlier; the rest are not copied. Turn it on in Settings.'));
   it('all sent', () => expect(skillLine(s({ skills: 5, skills_sent: 5, skills_pending: 0 }))).toBe('5 personal skills found. All sent.'));
+});
+
+describe('chatLine', () => {
+  it('none', () => expect(chatLine(s({ chats_in_projects: 0 }))).toBe('No chats in the selected projects.'));
+  it('not reviewed yet counts as off', () => expect(chatLine(s({ chats_in_projects: 605, chat_choice: '' }))).toBe('605 chats in the selected projects. Not copied. Turn it on in Settings.'));
+  it('switched off', () => expect(chatLine(s({ chats_in_projects: 1, chat_choice: 'skip' }))).toBe('1 chat in the selected projects. Not copied. Turn it on in Settings.'));
+  it('switched off after some were sent', () => expect(chatLine(s({ chats_in_projects: 605, chat_choice: 'skip', chats_sent: 5 }))).toBe('605 chats in the selected projects. 5 sent earlier; the rest are not copied. Turn it on in Settings.'));
+  it('waiting', () => expect(chatLine(s({ chats_in_projects: 605, chat_choice: 'include', chats_sent: 5, chats_pending: 600 }))).toBe('605 chats in the selected projects. 5 sent as documents, 600 waiting.'));
+  it('done', () => expect(chatLine(s({ chats_in_projects: 605, chat_choice: 'include', chats_sent: 605, chats_pending: 0 }))).toBe('605 chats in the selected projects. All sent as documents.'));
 });

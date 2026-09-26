@@ -87,3 +87,15 @@ func TestTouchJobKeepsLockFresh(t *testing.T) {
 		t.Fatalf("touched lock should be fresh, got %q", got)
 	}
 }
+
+func TestSettingsKeepCopyChoices(t *testing.T) {
+	s := open(t)
+	at := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	want := Settings{SkipArtifacts: true, SkipSkills: true, SkipMemory: true, CopyReviewedAt: at, ChatChoice: ChatsInclude}
+	if err := s.SaveSettings(want); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.LoadSettings(); got != want {
+		t.Fatalf("got %+v", got)
+	}
+}

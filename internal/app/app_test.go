@@ -69,6 +69,11 @@ func newTestApp(t *testing.T, sess *fakeSession) (*App, *int) {
 	if err := a.AcceptTerms(); err != nil {
 		t.Fatal(err)
 	}
+	// Like the notice, "What to copy" is saved once with its defaults; tests
+	// of the page itself start from an unreviewed store.
+	if err := a.SaveCopySettings(CopySettings{Artifacts: true, Skills: true, Memory: true}); err != nil {
+		t.Fatal(err)
+	}
 	return a, &opens
 }
 
@@ -310,6 +315,7 @@ func TestProgressEventsAreEmitted(t *testing.T) {
 		func(_ context.Context, name string, _ any) { mu.Lock(); events = append(events, name); mu.Unlock() })
 	a.opts.Sleep = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
 	a.AcceptTerms()
+	a.SaveCopySettings(CopySettings{Artifacts: true, Skills: true, Memory: true})
 	seedOne(t, a)
 	a.ConnectAccount("target")
 	a.Push("team")
@@ -484,6 +490,7 @@ func TestPushIncludesProjectsAddedAfterSelection(t *testing.T) {
 	a.st.SaveProject(store.ProjectMeta{UUID: "s2", Name: "Acme: New", Order: 1})
 	a.st.SaveProject(store.ProjectMeta{UUID: "s3", Name: "Personal: Diary", Order: 2})
 	a.SetOrg("target", "team", "Example Team")
+	a.st.SaveSettings(func() store.Settings { s, _ := a.st.LoadSettings(); s.PersonalChoice = store.PersonalSkip; return s }())
 	out, err := a.Push("")
 	if err != nil || out.Result.CreatedProjects != 2 {
 		t.Fatalf("out=%+v err=%v", out, err)

@@ -85,6 +85,9 @@ func (r *pushRun) adoptItems(p store.ProjectMeta, ps *store.ProjectState) error 
 	for _, a := range r.arts[p.UUID] {
 		have(docNames, a.FileName, ps.Artifacts, a.key())
 	}
+	for _, c := range r.chats[p.UUID] {
+		have(docNames, c.TranscriptAs, ps.Chats, c.UUID)
+	}
 	localFiles, err := r.st.ListFiles(p.UUID)
 	if err != nil {
 		return err

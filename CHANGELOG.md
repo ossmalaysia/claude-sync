@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3 (2026-09-26)
+
+- What to copy: after the first download, a settings page shows real counts and one switch for each kind of content: artifacts from chats, your own skills and memory (on by default), chats as documents and personal projects (off by default). Claude Sync sends nothing until the page has been saved once, and the new Settings button reopens it. Turning something off never removes what is already in the target. The home screen shows what is left out. This replaces the separate questions about personal projects and chats.
+- Chats as documents (opt-in): each chat in a selected project is added to that project as a Markdown transcript (what you and Claude wrote, without hidden reasoning). Chats downloaded by earlier versions are read once more to build their transcript.
+- Where to find everything: a screen, opened from the Send to target row, shows where projects, artifacts, chats, skills and memory are in the target account, and what stays on this computer.
+
 ## 0.1.2 (2026-09-25)
 
 - A first-use notice explains what Claude Sync does and that the user is responsible for what is copied into the target account; nothing runs until it is accepted.

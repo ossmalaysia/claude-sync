@@ -58,21 +58,33 @@ type Chat struct {
 	UUID        string `json:"uuid"`
 	Name        string `json:"name"`
 	ProjectUUID string `json:"project_uuid"` // "" for chats outside a project
+	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 }
 
 // ContentBlock is one block of a chat message. Input is set for tool_use blocks.
 type ContentBlock struct {
 	Type  string         `json:"type"`
+	Text  string         `json:"text"` // for text blocks
 	Name  string         `json:"name"`
 	Input map[string]any `json:"input"`
+}
+
+// Attachment is a file attached to a chat message.
+type Attachment struct {
+	FileName string `json:"file_name"`
 }
 
 type ChatMessage struct {
 	UUID       string         `json:"uuid"`
 	ParentUUID string         `json:"parent_message_uuid"`
 	Index      int            `json:"index"`
+	Sender     string         `json:"sender"` // "human" or "assistant"
+	Text       string         `json:"text"`   // older messages; newer ones use text blocks
+	CreatedAt  string         `json:"created_at"`
 	Content    []ContentBlock `json:"content"`
+	Attach     []Attachment   `json:"attachments"`
+	Files      []Attachment   `json:"files_v2"`
 }
 
 // ChatDetail is a conversation with its full message tree. Edited or retried

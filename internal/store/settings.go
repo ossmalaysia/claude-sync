@@ -8,6 +8,13 @@ import (
 	"time"
 )
 
+const (
+	PersonalSkip    = "skip"
+	PersonalInclude = "include"
+	ChatsSkip       = "skip"
+	ChatsInclude    = "include"
+)
+
 // Settings are the user's choices, remembered across app restarts.
 type Settings struct {
 	SourceOrg     string    `json:"source_org"`
@@ -29,6 +36,20 @@ type Settings struct {
 	LastSyncChats           int       `json:"last_sync_chats"`
 	LastSyncArtifacts       int       `json:"last_sync_artifacts"`
 	LastSyncSent            int       `json:"last_sync_sent"`
+	// Whether projects that look personal (Personal:, Family:, Travel) are
+	// sent: PersonalSkip, PersonalInclude, or "" when not asked yet.
+	PersonalChoice string `json:"personal_choice,omitempty"`
+	// Whether chat transcripts are added to their project in the target:
+	// ChatsSkip, ChatsInclude, or "" when not asked yet.
+	ChatChoice string `json:"chat_choice,omitempty"`
+	// Kinds of content the user switched off on the "What to copy" page. They
+	// stop being sent; nothing already in the target is removed.
+	SkipArtifacts bool `json:"skip_artifacts,omitempty"`
+	SkipSkills    bool `json:"skip_skills,omitempty"`
+	SkipMemory    bool `json:"skip_memory,omitempty"`
+	// When the user last saved the "What to copy" page; the app sends nothing
+	// until it has been reviewed once.
+	CopyReviewedAt time.Time `json:"copy_reviewed_at,omitempty"`
 	// The first-use notice the user accepted, and when.
 	TermsVersion    string    `json:"terms_version,omitempty"`
 	TermsAcceptedAt time.Time `json:"terms_accepted_at,omitempty"`
