@@ -139,6 +139,40 @@ once.
   preview is saved and uploaded as `<name>.webp` instead.
 - Files larger than 30 MB are skipped and reported.
 
+### Claude Code
+
+Claude Sync moves claude.ai content only. Claude Code sessions and projects
+cannot be migrated into another account, because:
+
+- Claude Code keeps sessions, per-project memory and settings as files on your
+  computer (`~/.claude/`), stored by folder rather than by account. They were
+  never on claude.ai, so there is nothing to copy between accounts there.
+- claude.ai has no way to import a Claude Code session, and Claude Code's only
+  export (`/export`) writes a plain text copy that cannot be resumed.
+- Sessions on Claude Code on the web (claude.ai/code) belong to the account that
+  started them and cannot be moved to another account.
+
+What this means when you switch to a new account on the same computer: sign in
+again (`claude auth logout`, then `claude auth login`), and your local sessions
+(`/resume`), memory, `CLAUDE.md` files, skills, plugins and settings keep
+working as before. Reconnect any claude.ai connectors under the new account.
+Pull any web sessions you need to your computer with `--teleport` before
+signing out of the old account.
+
+## Possible features (not built yet)
+
+Ideas we have checked are feasible but have not built. Open an
+[issue](https://github.com/ossmalaysia/claude-sync/issues) if you need one.
+
+- **Upload local Claude Code skills** (folders in `~/.claude/skills` with a
+  `SKILL.md`) to the target account's skills, using the same upload as
+  claude.ai skills. Claude Code picks them up again after you sign in.
+- **Claude Code sessions as documents:** turn local session logs into
+  readable transcripts and add them to a claude.ai project per repository, the
+  way chats are copied. Reference only; they cannot be resumed. Session logs
+  include file contents and command output, so this needs filtering of secrets
+  and a review step before anything is sent.
+
 ## Development
 
 Requirements: Go 1.26+, Node 20+, and the [Wails](https://wails.io) CLI.
