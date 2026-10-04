@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.4 (2026-10-04)
+
+- Chats outside projects (opt-in): choose Yes under What to copy to copy these conversations as Markdown documents into one new private target project. The default name is Previous Project; change it in Settings before creation. Generated artifacts follow the artifacts switch.
+- Interrupted uploads resume from saved progress, and later syncs send newly discovered chats into the same project. An unrelated target project with the same name is never adopted for this destination.
+- Turning this option off stops further uploads while keeping the created project visible for verification.
+- A corrupt migration state file is reported on the home screen without preventing its status from loading.
+
 ## 0.1.3 (2026-09-26)
 
 - What to copy: after the first download, a settings page shows real counts and one switch for each kind of content: artifacts from chats, your own skills and memory (on by default), chats as documents and personal projects (off by default). Claude Sync sends nothing until the page has been saved once, and the new Settings button reopens it. Turning something off never removes what is already in the target. The home screen shows what is left out. This replaces the separate questions about personal projects and chats.

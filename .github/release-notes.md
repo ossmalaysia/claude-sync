@@ -1,6 +1,13 @@
 Claude Sync: copy your claude.ai Projects, artifacts, personal skills and memory from one account to another (for example, personal to your team account).
 
-**What's new:** see the [changelog](https://github.com/ossmalaysia/claude-sync/blob/main/CHANGELOG.md).
+## New in v0.1.4
+
+- **Copy chats outside projects:** choose **Yes** under **What to copy** to send each conversation as a Markdown document into one new private project, named **Previous Project** by default.
+- **Choose the project name:** edit it in Settings before creation. After creation, rename it in claude.ai; future syncs keep using the same project.
+- **Resume and sync:** interrupted uploads resume from saved progress, and newly discovered chats are added on later syncs. Generated artifacts follow the artifacts switch. An unrelated same-name project is left untouched.
+- **Verification and error handling:** turning the option off stops uploads without hiding verification of the created project. Corrupt migration state is reported without preventing the home screen from loading.
+
+Full [changelog](https://github.com/ossmalaysia/claude-sync/blob/v0.1.4/CHANGELOG.md).
 
 **This is an early test version.** Please [report anything odd](https://github.com/ossmalaysia/claude-sync/issues/new/choose); the app's version is shown at the bottom of its window.
 
@@ -24,6 +31,7 @@ Step-by-step guide with screenshots: [docs/USER_GUIDE.md](https://github.com/oss
 
 - Projects with instructions, docs and files (images as full-resolution previews)
 - Artifacts from your chats, at their final version
+- Chat transcripts as project documents, including chats outside projects when enabled
 - Your own skills, with every file they contain (built-in Anthropic skills are not copied)
 - Memory, through claude.ai's memory import
 - **Scan & sync changes** afterwards sends only what is new

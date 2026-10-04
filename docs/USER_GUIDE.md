@@ -68,6 +68,7 @@ kind of content:
 | Projects | Always copied | Shows how many projects are selected. **Choose projects** opens the list, where you tick the Projects to move. |
 | Artifacts from chats | On | Adds each artifact from a chat in a Project to that Project as a document. |
 | Chats as documents | Off | Adds each chat in a Project to that Project as a document: what you and Claude wrote, without hidden reasoning. |
+| Chats outside projects | No | Choose **Yes** to copy these chats as documents into one new private Project, named **Previous Project** by default. Generated artifacts follow the artifacts switch. |
 | Your own skills | On | Uploads your skills with all their files. |
 | Memory | On | Sends your memory to the target account. |
 | Personal projects | Off | Projects whose names start with `Personal:`, `Family:` or `Travel`. The page lists their names. |
@@ -75,6 +76,11 @@ kind of content:
 Chats are off by default because they can be long and often hold things you
 would not want in a shared account. Personal projects are off for the same
 reason: the target is often a company account. Turn either on if you want them.
+
+For chats outside projects, change the new Project name in **Settings** before
+creation. After creation, rename it in claude.ai. Interrupted uploads resume,
+and later syncs keep using that same Project. This option copies those chats
+even when **Chats as documents** for existing Projects is off.
 
 Click **Save**. You must save this page once before Claude Sync sends anything.
 
@@ -131,9 +137,12 @@ In the target claude.ai account:
 - **Memory** is under Settings, Memory. claude.ai merges it in the background,
   so it can take a few minutes to appear.
 
-Artifacts and chats from chats outside any Project have no Project to go to, so
-they stay on this computer. Click **Open folder** next to *Artifacts from chats*
-to see the artifacts.
+When **Chats outside projects** is enabled, those conversations are documents
+in the new **Previous Project** (or the name you chose). Generated artifacts
+are added there when their switch is on. Otherwise, they stay on this computer.
+Click **Open folder** next to *Artifacts from chats* to see the readable artifact
+exports. Turning the option off stops further uploads; the created Project
+remains available for verification.
 
 ## What is not copied
 
