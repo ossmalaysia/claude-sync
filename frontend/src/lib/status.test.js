@@ -150,3 +150,8 @@ describe('chatLine', () => {
   it('waiting', () => expect(chatLine(s({ chats_in_projects: 605, chat_choice: 'include', chats_sent: 5, chats_pending: 600 }))).toBe('605 chats in the selected projects. 5 sent as documents, 600 waiting.'));
   it('done', () => expect(chatLine(s({ chats_in_projects: 605, chat_choice: 'include', chats_sent: 605, chats_pending: 0 }))).toBe('605 chats in the selected projects. All sent as documents.'));
 });
+
+it('includes outside-project artifacts in the migration status when opted in', () => {
+  expect(artifactLine(s({ chats: 3, artifacts: 2, artifacts_sent: 1, artifacts_pending: 1, artifacts_no_project: 2, unassigned_chats: true })))
+    .toBe('2 found in 3 chats. 1 sent, 1 waiting.');
+});

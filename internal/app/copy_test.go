@@ -48,7 +48,7 @@ func TestCopySettingsDefaultsBeforeReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := CopyView{
-		Settings: CopySettings{Artifacts: true, Chats: false, Skills: true, Memory: true, Personal: false},
+		Settings: CopySettings{UnassignedProjectName: store.DefaultUnassignedProjectName, Artifacts: true, Chats: false, Skills: true, Memory: true, Personal: false},
 		Counts: CopyCounts{Projects: 3, Selected: 1, Artifacts: 2, ArtifactsLocal: 1, Chats: 2, ChatsLocal: 1, Skills: 1, Memory: true,
 			PersonalProjects: []string{"Personal: Diary", "Travel 2026"}},
 	}
@@ -64,7 +64,7 @@ func TestSaveCopySettingsRoundTripAndSelection(t *testing.T) {
 	a, _ := newTestApp(t, &fakeSession{handle: defaultHandler})
 	unreview(t, a)
 	seedCopy(t, a)
-	in := CopySettings{Artifacts: false, Chats: true, Skills: false, Memory: false, Personal: true}
+	in := CopySettings{UnassignedProjectName: store.DefaultUnassignedProjectName, Artifacts: false, Chats: true, Skills: false, Memory: false, Personal: true}
 	if err := a.SaveCopySettings(in); err != nil {
 		t.Fatal(err)
 	}
@@ -237,5 +237,61 @@ func TestFirstSaveKeepsPersonalProjectPickedByHand(t *testing.T) {
 	}
 	if s, _ := a.Status(); s.PersonalChoice != store.PersonalSkip || s.PersonalSkipped != 1 {
 		t.Fatalf("status=%+v", s)
+	}
+}
+
+func TestUnassignedCopySettingsValidationAndStatus(t *testing.T) {
+	a, _ := newTestApp(t, &fakeSession{handle: defaultHandler})
+	seedCopy(t, a)
+	c := CopySettings{UnassignedChats: true, UnassignedProjectName: "  My chats  ", Artifacts: true, Skills: true, Memory: true}
+	if err := a.SaveCopySettings(c); err != nil {
+		t.Fatal(err)
+	}
+	v, err := a.GetCopySettings()
+	if err != nil || !v.Settings.UnassignedChats || v.Settings.UnassignedProjectName != "My chats" {
+		t.Fatalf("view=%+v err=%v", v, err)
+	}
+	status, err := a.Status()
+	if err != nil || status.ChatsPending != 1 || status.ChatsInProjects != 1 || status.PendingProjects != 2 {
+		t.Fatalf("status=%+v err=%v", status, err)
+	}
+	state, err := a.st.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps := state.Project(store.UnassignedProjectID)
+	ps.Target = "target-id"
+	ps.Name = "My chats"
+	if err := a.st.SaveState(state); err != nil {
+		t.Fatal(err)
+	}
+	c.UnassignedProjectName = "Different name"
+	if err := a.SaveCopySettings(c); err == nil {
+		t.Fatal("renaming a created destination must fail")
+	}
+	c.UnassignedProjectName = "My chats"
+	c.UnassignedChats = false
+	if err := a.SaveCopySettings(c); err != nil {
+		t.Fatal(err)
+	}
+	v, err = a.GetCopySettings()
+	if err != nil || !v.UnassignedProjectCreated || v.Settings.UnassignedChats {
+		t.Fatalf("view=%+v err=%v", v, err)
+	}
+	c.UnassignedProjectName = strings.Repeat("x", 101)
+	if err := a.SaveCopySettings(c); err == nil {
+		t.Fatal("long name accepted")
+	}
+}
+
+func TestChatsOnlyAccountRequiresCopyReview(t *testing.T) {
+	a, _ := newTestApp(t, &fakeSession{handle: defaultHandler})
+	unreview(t, a)
+	if err := a.st.SaveChat(store.ChatRecord{UUID: "loose", Transcript: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := a.copyReviewPending()
+	if err != nil || !pending {
+		t.Fatalf("pending=%v err=%v", pending, err)
 	}
 }

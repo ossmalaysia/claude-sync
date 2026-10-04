@@ -15,12 +15,14 @@
   let counts = $state(null);
   let error = $state('');
   let saving = $state(false);
+  let projectCreated = $state(false);
 
   async function load() {
     error = '';
     try {
       const v = await GetCopySettings();
       counts = v.counts;
+      projectCreated = v.unassigned_project_created;
       settings = draft ?? { ...v.settings };
     } catch (e) {
       error = String(e);
@@ -85,7 +87,7 @@
           <b>Artifacts from chats</b>
           <span id="opt-artifacts-d">
             {#if counts.artifacts}{plural(counts.artifacts, 'artifact')} in chats inside your projects, each added to its project as a document.{:else}No artifacts found in chats inside your projects.{/if}
-            {#if counts.artifacts_local}{num(counts.artifacts_local)} from chats outside a project stay on this computer.{/if}
+            {#if counts.artifacts_local}{num(counts.artifacts_local)} from chats outside a project {settings.unassigned_chats ? 'will be copied into the new project.' : 'stay on this computer unless you enable the option below.'}{/if}
           </span>
         </label>
       </li>
@@ -97,9 +99,24 @@
           <span id="opt-chats-d">
             {#if counts.chats}Each of the {plural(counts.chats, 'chat')} in your projects becomes a document named “Chat - title (date)” in its project, without Claude’s hidden reasoning.{:else}No chats found inside your projects.{/if}
             Off by default because it adds many documents to shared projects.
-            {#if counts.chats_local}{plural(counts.chats_local, 'chat')} outside a project stay on this computer.{/if}
+
           </span>
         </label>
+      </li>
+
+      <li>
+        <span></span>
+        <div class="text">
+          <b>Copy chats outside projects into a new project?</b>
+          <span id="opt-unassigned-d">{plural(counts.chats_local, 'chat')} outside projects. Yes copies each conversation as a Markdown document into one private target project, even when “Chats as documents” above is off. Generated artifacts follow the artifacts switch.</span>
+          <div class="choice" role="group" aria-label="Copy chats outside projects">
+            <button type="button" aria-pressed={settings.unassigned_chats} onclick={() => settings.unassigned_chats = true}>Yes</button>
+            <button type="button" aria-pressed={!settings.unassigned_chats} onclick={() => settings.unassigned_chats = false}>No</button>
+          </div>
+          <label for="unassigned-name">Project name</label>
+          <input class="project-name" id="unassigned-name" type="text" maxlength="100" bind:value={settings.unassigned_project_name} disabled={!settings.unassigned_chats || projectCreated} aria-describedby="unassigned-name-d" />
+          <span id="unassigned-name-d">Default: Previous Project. You can change this in Settings before creation. After creation, rename the project in claude.ai; future syncs keep using that project.</span>
+        </div>
       </li>
 
       <li>
@@ -165,6 +182,9 @@
   .text { display: flex; flex-direction: column; min-width: 0; grid-column: 2 / -1; }
   li:first-child .text { grid-column: 2; }
   label.text { cursor: pointer; }
+  .choice { display: flex; gap: 8px; margin: 8px 0; }
+  .choice button[aria-pressed="true"] { border-color: var(--brand); background: var(--brand); color: white; }
+  .opts input.project-name { width: 100%; max-width: 320px; height: auto; padding: 8px; cursor: text; margin: 4px 0; }
   .text b { font-weight: 600; font-size: 14px; }
   .text span { font-size: 13px; color: var(--slate); }
   .note { font-size: 13px; color: var(--slate); margin: 12px 0 16px; }

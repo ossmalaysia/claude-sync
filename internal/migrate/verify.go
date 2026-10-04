@@ -52,7 +52,11 @@ func Verify(ctx context.Context, api API, st *store.Store, state *store.State, o
 	if state.TargetOrg != "" && state.TargetOrg != org {
 		return nil, ErrOrgMismatch
 	}
-	projects, err := st.ListProjects()
+	settingsChoice, err := st.LoadSettings()
+	if err != nil {
+		return nil, err
+	}
+	projects, err := MigrationProjects(st)
 	if err != nil {
 		return nil, err
 	}
@@ -60,6 +64,7 @@ func Verify(ctx context.Context, api API, st *store.Store, state *store.State, o
 	if err != nil {
 		return nil, err
 	}
+	sel = migrationSelection(sel, settingsChoice.CopyUnassignedChats || (state.Projects[store.UnassignedProjectID] != nil && state.Projects[store.UnassignedProjectID].Target != ""))
 	var rows []VerifyRow
 	arts, err := artifactsToSend(st)
 	if err != nil {
@@ -84,7 +89,7 @@ func Verify(ctx context.Context, api API, st *store.Store, state *store.State, o
 			return rows, err
 		}
 		wantArts := len(arts[p.UUID]) // artifacts are added as docs
-		if arts == nil && ps != nil {
+		if (arts == nil || (p.UUID == store.UnassignedProjectID && !settingsChoice.CopyUnassignedChats)) && ps != nil {
 			wantArts = countDone(ps.Artifacts) // sent before the user switched artifacts off
 		}
 		row.WantDocs += wantArts

@@ -589,8 +589,9 @@ type AccountStatus struct {
 // Status is everything the home screen shows, rebuilt from the files on
 // disk, so it is correct after a restart and when the CLI did the work.
 type Status struct {
-	Source AccountStatus `json:"source"`
-	Target AccountStatus `json:"target"`
+	UnassignedChats bool          `json:"unassigned_chats"`
+	Source          AccountStatus `json:"source"`
+	Target          AccountStatus `json:"target"`
 
 	Job     string `json:"job"`      // "pull" | "push" | "" — running anywhere (app or CLI)
 	JobHere bool   `json:"job_here"` // running in this app, so it can be stopped here
@@ -737,7 +738,6 @@ func (a *App) Status() (Status, error) {
 	s.CopyReviewed = !choice.CopyReviewedAt.IsZero()
 	s.SkipArtifacts, s.SkipSkills, s.SkipMemory = choice.SkipArtifacts, choice.SkipSkills, choice.SkipMemory
 	sel := migrate.MergeSelection(projects, saved, choice.PersonalChoice == store.PersonalInclude) // read-only: Status must not write
-
 	for _, p := range projects {
 		if sel[p.UUID] {
 			s.Selected++
@@ -749,11 +749,32 @@ func (a *App) Status() (Status, error) {
 			}
 		}
 	}
+	// Preserve the status response when migration state cannot be read.
+	// MigrationProjects also reads state, so handle this before calling it.
 	state, err := a.st.LoadState()
 	if err != nil {
 		s.Error = err.Error()
 		s.Next = nextAction(s)
 		return s, nil
+	}
+	projects, err = migrate.MigrationProjects(a.st)
+	if err != nil {
+		return s, err
+	}
+	s.Projects = len(projects)
+	ps := state.Projects[store.UnassignedProjectID]
+	unassignedCreated := ps != nil && ps.Target != ""
+	// Already-created destinations remain visible for verification. Plan
+	// independently applies the opt-in setting to prevent further uploads.
+	sel[store.UnassignedProjectID] = choice.CopyUnassignedChats || unassignedCreated
+	for _, p := range projects {
+		if p.UUID == store.UnassignedProjectID && sel[p.UUID] {
+			s.Selected++
+		}
+	}
+	s.UnassignedChats = choice.CopyUnassignedChats
+	if choice.CopyUnassignedChats {
+		s.ChatChoice = store.ChatsInclude
 	}
 	if s.Target.Org != "" {
 		plan, err := migrate.Plan(a.st, sel, state, s.Target.Org, a.opts)
@@ -770,6 +791,10 @@ func (a *App) Status() (Status, error) {
 			s.Skipped = len(plan.Skipped)
 			s.Pushed = plan.SelectedProjects - plan.NewProjects
 		}
+	}
+	if unassignedCreated && !choice.CopyUnassignedChats {
+		// The upload plan omits this destination while it is disabled.
+		s.Pushed++
 	}
 	for _, it := range state.Skills {
 		switch it.Status {
@@ -790,6 +815,25 @@ func (a *App) Status() (Status, error) {
 				s.ChatsSent++
 			}
 		}
+	}
+	if ps := state.Projects[store.UnassignedProjectID]; ps != nil {
+		chats, err := a.st.ListChats()
+		if err != nil {
+			return s, err
+		}
+		local := 0
+		for _, c := range chats {
+			if c.ProjectUUID != "" {
+				continue
+			}
+			for _, art := range c.Artifacts {
+				it := ps.Artifacts[c.UUID+"/"+art.ID]
+				if it == nil || it.Status != store.StatusDone {
+					local++
+				}
+			}
+		}
+		s.ArtifactsNoProject = local
 	}
 	if s.ChatsInProjects, err = a.chatsInSelectedProjects(sel); err != nil {
 		return s, err

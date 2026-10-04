@@ -35,6 +35,11 @@ export leaves out knowledge-file contents. Claude Sync copies them for you:
 - **Memory**, sent through claude.ai's memory import
 - **Chats as documents** (optional, off by default): each chat in a Project is
   added to that Project as a transcript
+- **Chats outside projects** (optional, off by default): choose **Yes** under
+  **What to copy** to send these conversations as Markdown documents into one
+  new private project, **Previous Project**. Change its name in Settings before
+  creation; after creation, rename it in claude.ai. Later syncs reuse the same
+  project. Generated artifacts follow the artifacts switch.
 - **What to copy**: after the first download, one page with a switch for each
   kind of content; reopen it any time from **Settings**
 - **Keeps up**: *Scan & sync changes* sends only what is new since last time

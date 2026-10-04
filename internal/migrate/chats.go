@@ -10,7 +10,7 @@ import (
 // first, when the user chose to copy chats; otherwise nil.
 func transcriptsToSend(st *store.Store) (map[string][]store.ChatRecord, error) {
 	settings, err := st.LoadSettings()
-	if err != nil || settings.ChatChoice != store.ChatsInclude {
+	if err != nil || (settings.ChatChoice != store.ChatsInclude && !settings.CopyUnassignedChats) {
 		return nil, err
 	}
 	chats, err := st.ListChats()
@@ -25,6 +25,11 @@ func transcriptsToSend(st *store.Store) (map[string][]store.ChatRecord, error) {
 	})
 	out := map[string][]store.ChatRecord{}
 	for _, c := range chats {
+		if c.ProjectUUID == "" && settings.CopyUnassignedChats {
+			c.ProjectUUID = store.UnassignedProjectID
+		} else if settings.ChatChoice != store.ChatsInclude {
+			continue
+		}
 		if c.ProjectUUID != "" && c.Transcript != "" {
 			out[c.ProjectUUID] = append(out[c.ProjectUUID], c)
 		}

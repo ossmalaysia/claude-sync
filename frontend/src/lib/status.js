@@ -127,14 +127,14 @@ export function progress(s) {
 }
 
 // artifactLine summarises artifacts recovered from chats and how many reached
-// the target. Artifacts from chats outside a project are exported locally only.
+// the target, including opted-in chats outside projects.
 export function artifactLine(s) {
   if (!s.chats) return 'Not read yet. Pull reads your chats for artifacts.';
   if (!s.artifacts) return `No artifacts found in ${s.chats} chats.`;
   if (s.skip_artifacts) return offLine(`${s.artifacts} found in ${s.chats} chats.`, s.artifacts_sent);
   const parts = [`${s.artifacts_sent} sent`];
   if (s.artifacts_pending) parts.push(`${s.artifacts_pending} waiting`);
-  if (s.artifacts_no_project) parts.push(`${s.artifacts_no_project} kept locally (chats outside a project)`);
+  if (s.artifacts_no_project && !s.unassigned_chats) parts.push(`${s.artifacts_no_project} kept locally (chats outside a project)`);
   return `${s.artifacts} found in ${s.chats} chats. ${parts.join(', ')}.`;
 }
 

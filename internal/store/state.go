@@ -27,6 +27,7 @@ type ItemState struct {
 }
 
 type ProjectState struct {
+	Name         string                `json:"name,omitempty"` // name at creation for the unassigned-chat destination
 	Target       string                `json:"target,omitempty"`
 	Status       string                `json:"status,omitempty"` // "failed" when creation failed
 	Error        string                `json:"error,omitempty"`

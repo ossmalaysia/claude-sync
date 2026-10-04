@@ -16,11 +16,13 @@ var ErrReviewCopy = errors.New("review What to copy before sending")
 // CopySettings are the switches on the "What to copy" page. Projects are
 // always copied; which ones is the selection.
 type CopySettings struct {
-	Artifacts bool `json:"artifacts"` // artifacts from chats, as docs in their project
-	Chats     bool `json:"chats"`     // chats as transcript docs in their project
-	Skills    bool `json:"skills"`    // the user's own skills
-	Memory    bool `json:"memory"`
-	Personal  bool `json:"personal"` // projects that look personal (Personal:, Family:, Travel)
+	UnassignedChats       bool   `json:"unassigned_chats"`
+	UnassignedProjectName string `json:"unassigned_project_name"`
+	Artifacts             bool   `json:"artifacts"` // artifacts from chats, as docs in their project
+	Chats                 bool   `json:"chats"`     // chats as transcript docs in their project
+	Skills                bool   `json:"skills"`    // the user's own skills
+	Memory                bool   `json:"memory"`
+	Personal              bool   `json:"personal"` // projects that look personal (Personal:, Family:, Travel)
 }
 
 // CopyCounts is what the local copy holds, so each switch shows real numbers.
@@ -37,9 +39,10 @@ type CopyCounts struct {
 }
 
 type CopyView struct {
-	Settings CopySettings `json:"settings"`
-	Counts   CopyCounts   `json:"counts"`
-	Reviewed bool         `json:"reviewed"`
+	Settings                 CopySettings `json:"settings"`
+	Counts                   CopyCounts   `json:"counts"`
+	Reviewed                 bool         `json:"reviewed"`
+	UnassignedProjectCreated bool         `json:"unassigned_project_created"`
 }
 
 // copySettingsOf reads the switches from the saved settings. Before the page
@@ -47,6 +50,7 @@ type CopyView struct {
 // chats and personal projects off (or what the user answered earlier).
 func copySettingsOf(s store.Settings) CopySettings {
 	return CopySettings{
+		UnassignedChats: s.CopyUnassignedChats, UnassignedProjectName: s.UnassignedName(),
 		Artifacts: !s.SkipArtifacts,
 		Chats:     s.ChatChoice == store.ChatsInclude,
 		Skills:    !s.SkipSkills,
@@ -64,6 +68,16 @@ func (a *App) GetCopySettings() (CopyView, error) {
 		return v, err
 	}
 	v.Settings, v.Reviewed = copySettingsOf(settings), !settings.CopyReviewedAt.IsZero()
+	state, err := a.st.LoadState()
+	if err != nil {
+		return v, err
+	}
+	if ps := state.Projects[store.UnassignedProjectID]; ps != nil && ps.Target != "" {
+		v.UnassignedProjectCreated = true
+		if ps.Name != "" {
+			v.Settings.UnassignedProjectName = ps.Name
+		}
+	}
 	projects, err := a.st.ListProjects()
 	if err != nil {
 		return v, err
@@ -118,6 +132,20 @@ func (a *App) SaveCopySettings(c CopySettings) error {
 	if err != nil {
 		return err
 	}
+	name := strings.TrimSpace(c.UnassignedProjectName)
+	if name == "" {
+		name = store.DefaultUnassignedProjectName
+	}
+	if len([]rune(name)) > 100 || strings.ContainsAny(name, "\r\n\t") {
+		return errors.New("project name must be a single line of at most 100 characters")
+	}
+	state, err := a.st.LoadState()
+	if err != nil {
+		return err
+	}
+	if ps := state.Projects[store.UnassignedProjectID]; ps != nil && ps.Target != "" && ps.Name != "" && name != ps.Name {
+		return errors.New("this project has already been created; rename it in claude.ai")
+	}
 	// Tick or untick personal projects only when that switch changes, so
 	// projects picked by hand (also during the first review) survive a save.
 	// Unchanged, the choice is only recorded: the selection already follows it.
@@ -138,6 +166,7 @@ func (a *App) SaveCopySettings(c CopySettings) error {
 		settings.ChatChoice = store.ChatsInclude
 	}
 	settings.SkipArtifacts, settings.SkipSkills, settings.SkipMemory = !c.Artifacts, !c.Skills, !c.Memory
+	settings.CopyUnassignedChats, settings.UnassignedProjectName = c.UnassignedChats, name
 	settings.CopyReviewedAt = time.Now().UTC()
 	return a.st.SaveSettings(settings)
 }
@@ -150,17 +179,33 @@ func (a *App) copyReviewPending() (bool, error) {
 		return false, err
 	}
 	projects, err := a.st.ListProjects()
-	return len(projects) > 0, err
+	if err != nil || len(projects) > 0 {
+		return len(projects) > 0, err
+	}
+	chats, err := a.st.ListChats()
+	return len(chats) > 0, err
 }
 
 func (a *App) chatsInSelectedProjects(sel map[string]bool) (int, error) {
+	settings, err := a.st.LoadSettings()
+	if err != nil {
+		return 0, err
+	}
 	chats, err := a.st.ListChats()
 	if err != nil {
 		return 0, err
 	}
 	n := 0
 	for _, c := range chats {
-		if c.ProjectUUID != "" && sel[c.ProjectUUID] {
+		if c.ProjectUUID == "" {
+			if !settings.CopyUnassignedChats {
+				continue
+			}
+			c.ProjectUUID = store.UnassignedProjectID
+		} else if settings.CopyUnassignedChats && settings.ChatChoice != store.ChatsInclude {
+			continue
+		}
+		if sel[c.ProjectUUID] {
 			n++
 		}
 	}

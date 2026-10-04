@@ -50,7 +50,12 @@ func Push(ctx context.Context, api API, st *store.Store, state *store.State, org
 	if state.TargetOrg != "" && state.TargetOrg != org {
 		return res, ErrOrgMismatch
 	}
-	all, err := st.ListProjects()
+	settingsChoice, err := st.LoadSettings()
+	if err != nil {
+		return res, err
+	}
+	sel = migrationSelection(sel, settingsChoice.CopyUnassignedChats)
+	all, err := MigrationProjects(st)
 	if err != nil {
 		return res, err
 	}
@@ -105,7 +110,7 @@ func (r *pushRun) fail(item, msg string) {
 
 func (r *pushRun) pushProject(p store.ProjectMeta) error {
 	ps := r.state.Project(p.UUID)
-	if ps.Target == "" {
+	if ps.Target == "" && p.UUID != store.UnassignedProjectID {
 		// Another computer (or a lost state.json) may already have sent this
 		// project: use it rather than creating a duplicate.
 		existing, err := r.existingProject(p.Name)
@@ -142,6 +147,7 @@ func (r *pushRun) pushProject(p store.ProjectMeta) error {
 			return r.save()
 		}
 		ps.Target, ps.Status, ps.Error = created.UUID, "", ""
+		ps.Name = p.Name
 		r.res.CreatedProjects++
 		if err := r.touch(); err != nil {
 			return err

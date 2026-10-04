@@ -566,3 +566,95 @@ func TestSyncChangesStopsWhenPullStops(t *testing.T) {
 		t.Fatalf("out=%+v err=%v", out, err)
 	}
 }
+
+func TestStatusPreservesResponseForCorruptMigrationState(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unassigned=%v", enabled), func(t *testing.T) {
+			a, _ := newTestApp(t, &fakeSession{handle: defaultHandler})
+			seedOne(t, a)
+			settings, err := a.st.LoadSettings()
+			if err != nil {
+				t.Fatal(err)
+			}
+			settings.CopyUnassignedChats = enabled
+			if err := a.st.SaveSettings(settings); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(a.st.Root(), "migration", "state.json")
+			if err := os.WriteFile(path, []byte("invalid"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			status, err := a.Status()
+			if err != nil || !strings.Contains(status.Error, store.ErrCorruptState.Error()) || status.Projects != 1 || status.Selected != 1 {
+				t.Fatalf("expected usable status with state error: status=%+v err=%v", status, err)
+			}
+			contents, err := os.ReadFile(path)
+			if err != nil || string(contents) != "invalid" {
+				t.Fatalf("status changed corrupt state: %q err=%v", contents, err)
+			}
+		})
+	}
+}
+
+func TestDisabledUnassignedDestinationRemainsVisibleForVerification(t *testing.T) {
+	for _, withProject := range []bool{false, true} {
+		t.Run(fmt.Sprintf("source-project=%v", withProject), func(t *testing.T) {
+			a, _ := newTestApp(t, &fakeSession{handle: defaultHandler})
+			if err := a.SetOrg("source", "source", "Source account"); err != nil {
+				t.Fatal(err)
+			}
+			if err := a.SetOrg("target", "team", "Target account"); err != nil {
+				t.Fatal(err)
+			}
+			if err := a.st.SaveManifest(store.Manifest{SourceOrg: "source", Complete: true}); err != nil {
+				t.Fatal(err)
+			}
+			if err := a.st.SaveChat(store.ChatRecord{UUID: "loose", Transcript: "A pending conversation", TranscriptAs: "Chat - Pending.md"}); err != nil {
+				t.Fatal(err)
+			}
+			state, err := a.st.LoadState()
+			if err != nil {
+				t.Fatal(err)
+			}
+			state.TargetOrg = "team"
+			ps := state.Project(store.UnassignedProjectID)
+			ps.Target = "unassigned-target"
+			ps.Name = store.DefaultUnassignedProjectName
+			checks := map[string]store.VerifyResult{store.UnassignedProjectID: {OK: false, Error: "project missing in target", CheckedAt: time.Now()}}
+			want := 1
+			if withProject {
+				if err := a.st.SaveProject(store.ProjectMeta{UUID: "regular", Name: "Regular project"}); err != nil {
+					t.Fatal(err)
+				}
+				if err := a.st.SaveSelection(map[string]bool{"regular": true}); err != nil {
+					t.Fatal(err)
+				}
+				state.Project("regular").Target = "regular-target"
+				checks["regular"] = store.VerifyResult{OK: true, CheckedAt: time.Now()}
+				want++
+			}
+			if err := a.st.SaveState(state); err != nil {
+				t.Fatal(err)
+			}
+			if err := a.st.RecordVerify(checks); err != nil {
+				t.Fatal(err)
+			}
+			status, err := a.Status()
+			if err != nil || status.VerifyTotal != want || status.VerifyOK != want-1 || status.VerifyNotSelected != 0 || status.Next != "review" || status.Pushed != want {
+				t.Fatalf("disabled destination failure must stay visible: status=%+v err=%v", status, err)
+			}
+			// Keeping the destination visible must not reactivate pending uploads.
+			if status.UnassignedChats || status.PendingProjects != 0 || status.PendingItems != 0 || status.ChatsPending != 0 || status.ChatsInProjects != 0 {
+				t.Fatalf("disabled destination became eligible for uploads: %+v", status)
+			}
+			checks[store.UnassignedProjectID] = store.VerifyResult{OK: true, CheckedAt: time.Now()}
+			if err := a.st.RecordVerify(checks); err != nil {
+				t.Fatal(err)
+			}
+			status, err = a.Status()
+			if err != nil || status.VerifyOK != want || status.Next != "done" {
+				t.Fatalf("resolved failure not reflected: status=%+v err=%v", status, err)
+			}
+		})
+	}
+}

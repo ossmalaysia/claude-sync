@@ -38,7 +38,12 @@ func Plan(st *store.Store, sel map[string]bool, state *store.State, org string, 
 	if state.TargetOrg != "" && state.TargetOrg != org {
 		return res, ErrOrgMismatch
 	}
-	projects, err := st.ListProjects()
+	settingsChoice, err := st.LoadSettings()
+	if err != nil {
+		return res, err
+	}
+	sel = migrationSelection(sel, settingsChoice.CopyUnassignedChats)
+	projects, err := MigrationProjects(st)
 	if err != nil {
 		return res, err
 	}

@@ -81,7 +81,7 @@
         <dt>On this computer</dt>
         <dd>
           <span class="note">
-            Artifacts from chats outside any project have no project to go to, so they stay here as readable files{g.local_only ? ` (${g.local_only})` : ''}.
+            Readable artifact exports are saved here. Enable “Copy chats outside projects” in Settings to also send those conversations and their artifacts to a target project{g.local_only ? ` (${g.local_only})` : ''}.
           </span>
         </dd>
         <div class="act"><button onclick={() => Go.OpenArtifactsFolder().catch(fail)}>Open folder</button></div>

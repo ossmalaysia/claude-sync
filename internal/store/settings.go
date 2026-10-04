@@ -15,16 +15,29 @@ const (
 	ChatsInclude    = "include"
 )
 
+// UnassignedProjectID is the stable identity of the virtual chat destination.
+const UnassignedProjectID = "claude-sync-unassigned-chats"
+const DefaultUnassignedProjectName = "Previous Project"
+
+func (s Settings) UnassignedName() string {
+	if n := strings.TrimSpace(s.UnassignedProjectName); n != "" {
+		return n
+	}
+	return DefaultUnassignedProjectName
+}
+
 // Settings are the user's choices, remembered across app restarts.
 type Settings struct {
-	SourceOrg     string    `json:"source_org"`
-	SourceOrgName string    `json:"source_org_name"`
-	TargetOrg     string    `json:"target_org"`
-	TargetOrgName string    `json:"target_org_name"`
-	VerifiedAt    time.Time `json:"verified_at"`
-	VerifyOK      int       `json:"verify_ok"`
-	VerifyTotal   int       `json:"verify_total"`
-	VerifyWaiting int       `json:"verify_waiting"` // mismatches only because artifacts are not sent yet
+	CopyUnassignedChats   bool      `json:"copy_unassigned_chats,omitempty"`
+	UnassignedProjectName string    `json:"unassigned_project_name,omitempty"`
+	SourceOrg             string    `json:"source_org"`
+	SourceOrgName         string    `json:"source_org_name"`
+	TargetOrg             string    `json:"target_org"`
+	TargetOrgName         string    `json:"target_org_name"`
+	VerifiedAt            time.Time `json:"verified_at"`
+	VerifyOK              int       `json:"verify_ok"`
+	VerifyTotal           int       `json:"verify_total"`
+	VerifyWaiting         int       `json:"verify_waiting"` // mismatches only because artifacts are not sent yet
 	// Memory last sent to the target, and a hash of the text sent, so the
 	// same memory is not imported twice.
 	MemorySentAt time.Time `json:"memory_sent_at"`

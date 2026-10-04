@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/ossmalaysia/claude-sync/internal/migrate"
 	"github.com/ossmalaysia/claude-sync/internal/store"
 )
 
@@ -40,8 +41,13 @@ func (a *App) Guide() (Guide, error) {
 	artifactName, chatName := map[string]string{}, map[string]string{}
 	for _, c := range chats {
 		if c.ProjectUUID == "" {
-			g.LocalOnly += len(c.Artifacts)
-			continue
+			for _, art := range c.Artifacts {
+				ps := state.Projects[store.UnassignedProjectID]
+				if ps == nil || ps.Artifacts[c.UUID+"/"+art.ID] == nil || ps.Artifacts[c.UUID+"/"+art.ID].Status != store.StatusDone {
+					g.LocalOnly++
+				}
+			}
+			c.ProjectUUID = store.UnassignedProjectID
 		}
 		ps := state.Projects[c.ProjectUUID]
 		if ps == nil {
@@ -56,6 +62,14 @@ func (a *App) Guide() (Guide, error) {
 			chatName[c.ProjectUUID] = c.TranscriptAs
 		}
 	}
+	projects, err := migrate.MigrationProjects(a.st)
+	if err != nil {
+		return g, err
+	}
+	byID := map[string]store.ProjectMeta{}
+	for _, p := range projects {
+		byID[p.UUID] = p
+	}
 	best := -1
 	for src, ps := range state.Projects {
 		if ps.Target == "" {
@@ -64,8 +78,8 @@ func (a *App) Guide() (Guide, error) {
 		g.Projects++
 		score := countDone(ps.Artifacts) + countDone(ps.Chats)
 		if score > best || (score == best && g.Example != nil && src < g.Example.SourceUUID) {
-			p, ok, err := a.st.LoadProject(src)
-			if err != nil || !ok {
+			p, ok := byID[src]
+			if !ok {
 				continue
 			}
 			best = score

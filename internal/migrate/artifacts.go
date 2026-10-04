@@ -182,17 +182,24 @@ func artifactsToSend(st *store.Store) (map[string][]artifactRef, error) {
 }
 
 // artifactsByProject groups the saved artifacts by source project uuid.
-// Artifacts from chats outside a project are not included.
+// Opted-in chats outside projects use the virtual migration destination.
 func artifactsByProject(st *store.Store) (map[string][]artifactRef, error) {
 	chats, err := st.ListChats()
 	if err != nil {
 		return nil, err
 	}
 	sort.Slice(chats, func(i, j int) bool { return chats[i].UUID < chats[j].UUID })
+	settings, err := st.LoadSettings()
+	if err != nil {
+		return nil, err
+	}
 	out := map[string][]artifactRef{}
 	for _, c := range chats {
 		if c.ProjectUUID == "" {
-			continue
+			if !settings.CopyUnassignedChats {
+				continue
+			}
+			c.ProjectUUID = store.UnassignedProjectID
 		}
 		for _, a := range c.Artifacts {
 			out[c.ProjectUUID] = append(out[c.ProjectUUID], artifactRef{Chat: c.UUID, ArtifactRecord: a})
