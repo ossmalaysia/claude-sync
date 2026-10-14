@@ -24,6 +24,9 @@ commands:
   login  --account source|target   open the browser, wait for login, list orgs
   pull   --org <source-org-uuid>    download projects from the source account
   plan   --org <target-org-uuid>    show what push would do (no network)
+  preview --org <target-org-uuid>  inspect target content and report conflicts (read only)
+  directions                      list saved sync directions
+  reverse                         reverse the current direction, preserving history
   push   --org <target-org-uuid>    create selected projects in the target org
   verify --org <target-org-uuid>    compare target counts with what was pushed
   smoke  --org <target-org-uuid>    create, check and delete a test project
@@ -53,7 +56,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	from := fs.String("from", "", "source org uuid (sync; default: the remembered source org)")
 	to := fs.String("to", "", "target org uuid (sync; default: the remembered target org)")
 	switch cmd {
-	case "login", "pull", "plan", "push", "verify", "smoke", "memory", "sync":
+	case "login", "pull", "plan", "preview", "directions", "reverse", "push", "verify", "smoke", "memory", "sync":
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", cmd, usage)
 		return 2
@@ -65,7 +68,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "login needs --account source|target")
 		return 2
 	}
-	if cmd != "login" && cmd != "sync" && *org == "" {
+	if cmd != "login" && cmd != "sync" && cmd != "directions" && cmd != "reverse" && *org == "" {
 		fmt.Fprintf(stderr, "%s needs --org <uuid>\n", cmd)
 		return 2
 	}
@@ -120,6 +123,31 @@ func connect(ctx context.Context, st *store.Store, account string, out io.Writer
 func loadSelection(st *store.Store) (map[string]bool, error) { return migrate.EffectiveSelection(st) }
 
 func dispatch(ctx context.Context, cmd string, st *store.Store, org, account string, out io.Writer) error {
+	if cmd == "directions" {
+		directions, err := st.ListDirections()
+		if err != nil {
+			return err
+		}
+		for _, d := range directions {
+			marker := " "
+			if d.Active {
+				marker = "*"
+			}
+			fmt.Fprintf(out, "%s %s -> %s (%s -> %s)\n", marker, d.SourceName, d.TargetName, d.SourceOrg, d.TargetOrg)
+		}
+		return nil
+	}
+	if cmd == "reverse" {
+		settings, err := st.LoadSettings()
+		if err != nil {
+			return err
+		}
+		if err := st.ActivateDirection(settings.TargetOrg, settings.SourceOrg, settings.TargetOrgName, settings.SourceOrgName, !st.Reversed()); err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "Direction reversed. Pull the source, then preview before pushing.")
+		return nil
+	}
 	opts := migrate.DefaultOptions()
 	report := func(e migrate.Event) {
 		fmt.Fprintf(out, "[%s %d/%d] %s%s\n", e.Stage, e.Done, e.Total, map[string]string{"warn": "WARN ", "error": "ERROR "}[e.Level], e.Message)
@@ -145,7 +173,7 @@ func dispatch(ctx context.Context, cmd string, st *store.Store, org, account str
 		for _, c := range res.Changed {
 			fmt.Fprintf(out, "  changed in source, not synced: %s\n", c)
 		}
-		fmt.Fprintf(out, "edit %s to change which projects are included\n", st.Root()+"/migration/selection.json")
+		fmt.Fprintf(out, "edit %s to change which projects are included\n", st.DataDir()+"/selection.json")
 		return nil
 	}
 
@@ -156,7 +184,7 @@ func dispatch(ctx context.Context, cmd string, st *store.Store, org, account str
 	case "pull":
 		acct = "source"
 	}
-	if cmd == "pull" || cmd == "push" {
+	if cmd == "pull" || cmd == "push" || cmd == "preview" {
 		// Same lock as the desktop app: one job at a time, visible in the app.
 		release, err := st.AcquireJob(cmd)
 		if err != nil {
@@ -187,7 +215,25 @@ func dispatch(ctx context.Context, cmd string, st *store.Store, org, account str
 			return err
 		}
 		fmt.Fprintf(out, "pulled %d projects, %d docs, %d files (%.1f MB), %d images as WebP preview; %d chats, %d artifacts; %d failed\n", res.Projects, res.Docs, res.Files, float64(res.Bytes)/(1<<20), res.Converted, res.Chats, res.Artifacts, len(res.Failed))
-		fmt.Fprintf(out, "memory saved to %s — paste it into claude.ai Settings → Memory in the target account\n", st.Root()+"/migration/memory.md")
+		fmt.Fprintf(out, "memory saved to %s — paste it into claude.ai Settings → Memory in the target account\n", st.DataDir()+"/memory.md")
+	case "preview":
+		state, err := st.LoadState()
+		if err != nil {
+			return err
+		}
+		sel, err := loadSelection(st)
+		if err != nil {
+			return err
+		}
+		plan, err := migrate.Preview(ctx, c, st, state, org, sel, opts)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%d new projects, %d new documents/files, %d already copied, %d conflicts\n", plan.NewProjects, plan.NewDocs+plan.NewFiles+plan.NewArtifacts+plan.NewChats, plan.AlreadyCopied, len(plan.Conflicts))
+		for _, message := range plan.Conflicts {
+			fmt.Fprintln(out, "  CONFLICT "+message)
+		}
+		return nil
 	case "push":
 		state, err := st.LoadState()
 		if err != nil {
@@ -201,6 +247,9 @@ func dispatch(ctx context.Context, cmd string, st *store.Store, org, account str
 		fmt.Fprintf(out, "created %d projects, %d instructions, %d docs, %d files, %d artifacts, %d skills; %d failed\n", res.CreatedProjects, res.Instructions, res.Docs, res.Files, res.Artifacts, res.Skills, len(res.Failed))
 		for _, f := range res.Failed {
 			fmt.Fprintf(out, "  FAILED %s / %s: %s\n", f.Project, f.Item, f.Error)
+		}
+		for _, message := range res.Conflicts {
+			fmt.Fprintln(out, "  CONFLICT "+message)
 		}
 		switch {
 		case errors.Is(err, migrate.ErrAuthPaused):
@@ -300,6 +349,17 @@ func runSync(ctx context.Context, st *store.Store, from, to string, out io.Write
 	if from == "" || to == "" {
 		return errors.New("sync needs --from and --to the first time (or run pull and push once)")
 	}
+	reversed := st.Reversed()
+	if from == settings.TargetOrg && to == settings.SourceOrg {
+		reversed = !reversed
+	}
+	if err := st.ActivateDirection(from, to, from, to, reversed); err != nil {
+		return err
+	}
+	state, err = st.LoadState()
+	if err != nil {
+		return err
+	}
 	opts := migrate.DefaultOptions()
 	report := func(e migrate.Event) {
 		if e.Level != "info" {
@@ -342,6 +402,9 @@ func runSync(ctx context.Context, st *store.Store, from, to string, out io.Write
 		return fmt.Errorf("send: %w", err)
 	}
 	sent := res.CreatedProjects + res.Instructions + res.Docs + res.Files + res.Artifacts + res.Chats + res.Skills
+	for _, message := range res.Conflicts {
+		fmt.Fprintln(out, "  CONFLICT "+message)
+	}
 	fmt.Fprintf(out, "send: %d projects (%d already in the target), %d instructions, %d docs, %d files, %d artifacts, %d chats, %d skills; %d failed\n",
 		res.CreatedProjects, res.AdoptedProjects, res.Instructions, res.Docs, res.Files, res.Artifacts, res.Chats, res.Skills, len(res.Failed))
 	mem, err := syncMemory(ctx, dc, st, to)

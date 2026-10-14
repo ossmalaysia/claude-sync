@@ -21,6 +21,7 @@ type PushResult struct {
 	Touched         []string  `json:"touched"` // source projects that received any write
 	Skills          int       `json:"skills"`  // skills uploaded
 	Failed          []Failure `json:"failed"`
+	Conflicts       []string  `json:"conflicts"`
 }
 
 type pushRun struct {
@@ -110,6 +111,7 @@ func (r *pushRun) fail(item, msg string) {
 
 func (r *pushRun) pushProject(p store.ProjectMeta) error {
 	ps := r.state.Project(p.UUID)
+	hadTarget := ps.Target != ""
 	if ps.Target == "" && p.UUID != store.UnassignedProjectID {
 		// Another computer (or a lost state.json) may already have sent this
 		// project: use it rather than creating a duplicate.
@@ -117,6 +119,11 @@ func (r *pushRun) pushProject(p store.ProjectMeta) error {
 		if err != nil {
 			if stop := stopErr(err); stop != nil {
 				return errors.Join(stop, r.save())
+			}
+			if _, ok := err.(*ambiguousProject); ok {
+				ps.Status, ps.Error = store.StatusConflict, err.Error()
+				r.res.Conflicts = append(r.res.Conflicts, p.Name+": "+err.Error())
+				return r.save()
 			}
 			ps.Status, ps.Error = store.StatusFailed, "could not check the target for this project: "+err.Error()
 			r.fail("project", ps.Error)
@@ -134,10 +141,25 @@ func (r *pushRun) pushProject(p store.ProjectMeta) error {
 			r.report.emit(Event{Stage: "push", Level: "info", Message: p.Name + ": already in the target, sending only what is missing"})
 		}
 	}
+	if hadTarget {
+		if err := r.reconcileItems(p, ps); err != nil {
+			if stop := stopErr(err); stop != nil {
+				return stop
+			}
+			r.fail("check target", err.Error())
+			ps.Status, ps.Error = store.StatusFailed, "could not verify target content: "+err.Error()
+			return r.save()
+		}
+	}
+	r.res.Conflicts = append(r.res.Conflicts, projectConflicts(p, ps)...)
+	if ps.Status == store.StatusConflict {
+		return r.save()
+	}
+	if err := r.save(); err != nil {
+		return err
+	}
 	if ps.Target == "" {
-		created, attempts, err := withRetry(r.ctx, r.opts, func() (claudeapi.Project, error) {
-			return r.api.CreateProject(r.ctx, r.org, claudeapi.NewProject{Name: p.Name, Description: p.Description, IsPrivate: p.IsPrivate})
-		})
+		created, attempts, err := withRetry(r.ctx, r.opts, r.projectWriter(p))
 		if err != nil {
 			if stop := stopErr(err); stop != nil {
 				return errors.Join(stop, r.save())
@@ -160,7 +182,7 @@ func (r *pushRun) pushProject(p store.ProjectMeta) error {
 		}
 	}
 
-	if p.PromptTemplate != "" && (ps.Instructions == nil || ps.Instructions.Status != store.StatusDone) {
+	if p.PromptTemplate != "" && (ps.Instructions == nil || (ps.Instructions.Status != store.StatusDone && ps.Instructions.Status != store.StatusConflict)) {
 		if ps.Instructions == nil {
 			ps.Instructions = &store.ItemState{}
 		}
@@ -181,17 +203,14 @@ func (r *pushRun) pushProject(p store.ProjectMeta) error {
 	}
 	for _, d := range docs {
 		it := ps.Docs[d.UUID]
-		if it != nil && it.Status == store.StatusDone {
+		if it != nil && (it.Status == store.StatusDone || it.Status == store.StatusConflict) {
 			continue
 		}
 		if it == nil {
 			it = &store.ItemState{}
 			ps.Docs[d.UUID] = it
 		}
-		err := r.item("doc "+d.FileName, it, contentSHA(d.Content), func() (string, error) {
-			doc, err := r.api.CreateDoc(r.ctx, r.org, ps.Target, d.FileName, d.Content)
-			return doc.UUID, err
-		})
+		err := r.item("doc "+d.FileName, it, contentSHA(d.Content), r.docWriter(d.FileName, d.Content))
 		if err != nil {
 			return err
 		}
@@ -206,7 +225,7 @@ func (r *pushRun) pushProject(p store.ProjectMeta) error {
 	}
 	for _, f := range files {
 		it := ps.Files[f.UUID]
-		if it != nil && (it.Status == store.StatusDone || it.Status == store.StatusSkipped) {
+		if it != nil && (it.Status == store.StatusDone || it.Status == store.StatusSkipped || it.Status == store.StatusConflict) {
 			continue
 		}
 		if it == nil {
@@ -231,10 +250,7 @@ func (r *pushRun) pushProject(p store.ProjectMeta) error {
 			}
 			continue
 		}
-		err = r.item(label, it, "", func() (string, error) {
-			up, err := r.api.UploadFile(r.ctx, r.org, ps.Target, f.FileName, f.Mime, data)
-			return up.FileUUID, err
-		})
+		err = r.item(label, it, contentSHA(string(data)), r.fileWriter(f.FileName, f.Mime, data))
 		if err != nil {
 			return err
 		}
@@ -246,7 +262,7 @@ func (r *pushRun) pushProject(p store.ProjectMeta) error {
 	// Artifacts from this project's chats become docs in the target project.
 	for _, a := range r.arts[p.UUID] {
 		it := ps.Artifacts[a.key()]
-		if it != nil && it.Status == store.StatusDone {
+		if it != nil && (it.Status == store.StatusDone || it.Status == store.StatusConflict) {
 			continue
 		}
 		if it == nil {
@@ -254,10 +270,7 @@ func (r *pushRun) pushProject(p store.ProjectMeta) error {
 			ps.Artifacts[a.key()] = it
 		}
 		a := a
-		err := r.item("artifact "+a.FileName, it, contentSHA(a.Content), func() (string, error) {
-			doc, err := r.api.CreateDoc(r.ctx, r.org, ps.Target, a.FileName, a.Content)
-			return doc.UUID, err
-		})
+		err := r.item("artifact "+a.FileName, it, contentSHA(a.Content), r.docWriter(a.FileName, a.Content))
 		if err != nil {
 			return err
 		}
@@ -269,7 +282,7 @@ func (r *pushRun) pushProject(p store.ProjectMeta) error {
 	// Chat transcripts, when the user chose to copy chats.
 	for _, c := range r.chats[p.UUID] {
 		it := ps.Chats[c.UUID]
-		if it != nil && it.Status == store.StatusDone {
+		if it != nil && (it.Status == store.StatusDone || it.Status == store.StatusConflict) {
 			continue
 		}
 		if it == nil {
@@ -277,10 +290,7 @@ func (r *pushRun) pushProject(p store.ProjectMeta) error {
 			ps.Chats[c.UUID] = it
 		}
 		c := c
-		err := r.item("chat "+c.TranscriptAs, it, contentSHA(c.Transcript), func() (string, error) {
-			doc, err := r.api.CreateDoc(r.ctx, r.org, ps.Target, c.TranscriptAs, c.Transcript)
-			return doc.UUID, err
-		})
+		err := r.item("chat "+c.TranscriptAs, it, contentSHA(c.Transcript), r.docWriter(c.TranscriptAs, c.Transcript))
 		if err != nil {
 			return err
 		}

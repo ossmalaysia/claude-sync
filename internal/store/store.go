@@ -11,10 +11,16 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
-type Store struct{ root string }
+type Store struct {
+	root     string
+	mu       sync.RWMutex
+	dataDir  string
+	reversed bool
+}
 
 // DefaultRoot is $CLAUDE_SYNC_DATA if set (e.g. for a trial run or a demo),
 // otherwise <user config dir>/claude-sync.
@@ -40,15 +46,46 @@ func Open(root string) (*Store, error) {
 	if err := os.Chmod(root, 0o700); err != nil { // #nosec G302 -- a directory needs the execute bit
 		return nil, err
 	}
-	return &Store{root: root}, nil
+	s := &Store{root: root, dataDir: filepath.Join(root, "migration")}
+	var index directionIndex
+	if err := readJSON(filepath.Join(root, "directions.json"), &index); err == nil {
+		if d, ok := index.Directions[index.Active]; ok {
+			if d.ID != "" {
+				if err := validID(d.ID); err != nil {
+					return nil, err
+				}
+			}
+			s.dataDir = s.directionDir(d.ID)
+			s.reversed = d.Reversed
+		} else {
+			return nil, fmt.Errorf("active saved direction is missing")
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	return s, nil
 }
 
 func (s *Store) Root() string { return s.root }
 
-func (s *Store) ProfileDir(account string) string { return filepath.Join(s.root, "profiles", account) }
+func (s *Store) ProfileDir(account string) string {
+	s.mu.RLock()
+	reversed := s.reversed
+	s.mu.RUnlock()
+	if reversed {
+		if account == "source" {
+			account = "target"
+		} else if account == "target" {
+			account = "source"
+		}
+	}
+	return filepath.Join(s.root, "profiles", account)
+}
+
+func (s *Store) DataDir() string { s.mu.RLock(); defer s.mu.RUnlock(); return s.dataDir }
 
 func (s *Store) path(parts ...string) string {
-	return filepath.Join(append([]string{s.root, "migration"}, parts...)...)
+	return filepath.Join(append([]string{s.DataDir()}, parts...)...)
 }
 
 func validID(id string) error {

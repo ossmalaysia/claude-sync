@@ -43,6 +43,12 @@ export leaves out knowledge-file contents. Claude Sync copies them for you:
 - **What to copy**: after the first download, one page with a switch for each
   kind of content; reopen it any time from **Settings**
 - **Keeps up**: *Scan & sync changes* sends only what is new since last time
+- **Saved directions and reverse**: keep separate histories for each source/target
+  pair. Reverse direction reuses saved project and file IDs, including renamed projects.
+- **Preview before sending**: compare target content, skip identical copies, and
+  flag different versions for review. Ambiguous project names can be linked manually.
+- **Update notifications**: check published GitHub releases at startup and every
+  six hours, or use **Check for updates**. New versions open in your browser for installation.
 
 > [!IMPORTANT]
 > Claude Sync is an independent open-source project. It is **not affiliated
@@ -146,7 +152,7 @@ once.
 
 ## Development
 
-Requirements: Go 1.26+, Node 20+, and the [Wails](https://wails.io) CLI.
+Requirements: Go 1.26.9+, Node 20+, and the [Wails](https://wails.io) CLI.
 
 ```bash
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
@@ -161,13 +167,11 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Privacy
 
-Claude Sync collects no data. It has no telemetry, analytics or accounts of its
-own, and it will not transfer any information to other networked systems unless
-the user asks it to. It connects only to claude.ai, in a browser window on your
-computer, to read the source account and write to the target account you
-choose. Everything it downloads (projects, artifacts, skills, memory) and your
-browser logins stay in a private folder on your computer; delete that folder to
-remove them.
+Claude Sync has no telemetry, analytics or accounts of its own. It connects to
+claude.ai through a browser to read the source and write to the target you choose.
+Update checks request public release metadata from GitHub; they send no Claude
+credentials, account identifiers or local content. Downloads and browser logins
+stay in a private folder on your computer; delete that folder to remove them.
 
 ## Code signing policy
 

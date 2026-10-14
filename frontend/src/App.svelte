@@ -25,16 +25,41 @@
   let memory = $state('');
   let showMemory = $state(false);
   let copied = $state(false);
+  let directions = $state([]);
+  let preview = $state(null);
+  let pendingSend = $state('');
+  let update = $state(null);
+  let checkingUpdate = $state(false);
+  let updateMessage = $state('');
+  let dismissedUpdate = $state('');
 
   async function refresh() {
     try {
       status = await Go.Status();
+      directions = await Go.ListDirections();
     } catch (e) {
       error = String(e);
     }
   }
 
   let version = $state('');
+
+  async function checkUpdates(manual = false) {
+    if (checkingUpdate) return;
+    checkingUpdate = true;
+    if (manual) { updateMessage = ''; dismissedUpdate = ''; }
+    try {
+      update = await Go.CheckForUpdates(manual);
+      if (manual) updateMessage = {
+        available: `${update.latest_version} is available.`,
+        current: `You’re up to date (${version || update.current_version}).`,
+        development: `Development build. Latest published version: ${update.latest_version}.`,
+        unavailable: 'Couldn’t check for updates. Check your connection and try again.',
+      }[update.status] || '';
+    } catch {
+      if (manual) updateMessage = 'Couldn’t check for updates. Try again.';
+    } finally { checkingUpdate = false; }
+  }
 
   function openLink(name) {
     Go.OpenLink(name).catch((e) => (error = String(e)));
@@ -43,8 +68,10 @@
   onMount(() => {
     refresh();
     Go.Version().then((v) => (version = v)).catch(() => {});
+    checkUpdates();
     const timer = setInterval(refresh, 3000);
-    return () => clearInterval(timer);
+    const updateTimer = setInterval(() => checkUpdates(), 6 * 60 * 60 * 1000);
+    return () => { clearInterval(timer); clearInterval(updateTimer); };
   });
 
   const off = EventsOn('progress', (e) => {
@@ -74,14 +101,21 @@
     if (out.status === 'paused') notice = `${what} stopped. Everything done so far is saved. Press Resume to continue.`;
     else if (out.status === 'needs_login')
       notice = `The ${what === 'Pull' ? 'source' : 'target'} login expired or its browser window was closed. Press Resume and log in to the window that opens.`;
-    else notice = `${what} finished.`;
+    else notice = `${what} finished.${out.result?.conflicts?.length ? ` ${out.result.conflicts.length} conflicts need review; those items were skipped.` : ''}`;
   }
 
   const actions = {
+    preview: () => run('preview', async () => { preview = await Go.Preview(); }),
+    reverse: () => run('reverse', async () => {
+      await Go.ReverseDirection();
+      clearDirectionView();
+      notice = 'Direction reversed. Download the source, review what to copy, then preview the target.';
+    }),
     connect_source: () => run('connect_source', async () => (orgs.source = await Go.ConnectAccount('source'))),
     connect_target: () => run('connect_target', async () => (orgs.target = await Go.ConnectAccount('target'))),
-    pull: () => run('pull', async () => outcome('Pull', await Go.Pull(''))),
-    push: () => run('push', async () => outcome('Push', await Go.Push(''))),
+    pull: () => run('pull', async () => { preview = null; pendingSend = ''; outcome('Pull', await Go.Pull('')); }),
+    push: () => prepareSend('push'),
+    push_confirmed: () => run('push', async () => { outcome('Push', await Go.Push('')); preview = null; pendingSend = ''; }),
     verify: () =>
       run('verify', async () => {
         verifyRows = await Go.Verify('');
@@ -92,13 +126,16 @@
       selectBack = 'home';
       view = 'select';
     },
-    sync: () =>
+    sync: () => prepareSend('sync'),
+    sync_confirmed: () =>
       run('sync', async () => {
         const out = await Go.SyncChanges();
+        if (out.push?.conflicts?.length) log = [...log, ...out.push.conflicts];
         const where = { pull: 'while scanning the source', push: 'while sending', memory: 'while sending memory' }[out.stage] || '';
         if (out.status === 'completed') notice = 'Sync finished. ' + (lastSyncLine(await Go.Status()) || '');
         else if (out.status === 'paused') notice = `Sync stopped ${where}. Everything done so far is saved; press Scan & sync to continue.`;
         else notice = `A login expired or a browser window was closed ${where}. Press Scan & sync and log in to the window that opens.`;
+        preview = null; pendingSend = '';
       }),
     memory: () =>
       run('memory', async () => {
@@ -116,8 +153,28 @@
   async function chooseOrg(account, uuid) {
     const o = orgs[account].orgs.find((x) => x.uuid === uuid);
     await Go.SetOrg(account, o.uuid, o.name);
+    clearDirectionView();
     orgs[account] = null;
     await refresh();
+  }
+
+  function clearDirectionView() {
+    preview = null; pendingSend = ''; verifyRows = []; memory = ''; showMemory = false; log = []; orgs = { source: null, target: null };
+  }
+  function prepareSend(kind) {
+    return run('preview', async () => {
+      preview = null; pendingSend = '';
+      if (kind === 'sync') {
+        const out = await Go.Pull('');
+        if (out.status !== 'completed') { outcome('Pull', out); return; }
+      }
+      preview = await Go.Preview(); pendingSend = kind;
+      notice = 'Review the preview, then send the missing items. Conflicts are skipped.';
+    });
+  }
+  function selectDirection(value) {
+    const d = directions.find((d) => `${d.source_org}|${d.target_org}` === value);
+    if (d) run('direction', async () => { await Go.SelectDirection(d.source_org, d.target_org); clearDirectionView(); });
   }
 
   // Opens the local artifacts-export folder in Finder or Explorer.
@@ -130,7 +187,7 @@
   }
 
   // The "What to copy" page, opened from Settings or from a row's Change link.
-  const openSettings = () => (view = 'copy');
+  const openSettings = () => { preview = null; pendingSend = ''; view = 'copy'; };
   function chooseFromSettings() {
     selectBack = 'copy';
     view = 'select';
@@ -146,7 +203,7 @@
   const rowState = $derived.by(() => {
     if (!status) return {};
     const s = status;
-    const pushDone = s.pushed > 0 && s.pending_projects + s.pending_items + s.failed - (s.skills_failed || 0) === 0;
+    const pushDone = !s.conflicts?.length && s.pushed > 0 && s.pending_projects + s.pending_items + s.failed - (s.skills_failed || 0) === 0;
     return {
       pull: s.pull_complete ? 'done' : s.pull_done || s.job === 'pull' ? 'active' : 'todo',
       select: s.selected > 0 ? 'done' : 'todo',
@@ -169,6 +226,14 @@
     {/if}
   </header>
 
+  {#if update?.status === 'available' && dismissedUpdate !== update.latest_version}
+    <div class="update-banner" role="status">
+      <div><strong>Claude Sync {update.latest_version} is available</strong><p>Finish any sync before installing. Your saved logins and transfer history stay on this computer.</p></div>
+      <button class="primary" onclick={() => Go.OpenUpdate().catch(() => { updateMessage = 'Couldn’t open the release page. Try again.'; })}>View update</button>
+      <button class="link" onclick={() => { dismissedUpdate = update.latest_version; }}>Later</button>
+    </div>
+  {/if}
+
   <main>
     {#if status && !status.terms_accepted}
       <Notice done={refresh} />
@@ -183,6 +248,16 @@
         done={() => { view = 'home'; refresh(); }}
       />
     {:else if status}
+      <div class="direction-actions">
+        <label>Saved direction
+          <select aria-label="Saved direction" disabled={locked || !directions.length} value={`${status.source.org}|${status.target.org}`} onchange={(e) => selectDirection(e.currentTarget.value)}>
+            {#each directions as d}
+              <option value={`${d.source_org}|${d.target_org}`}>{d.source_name || d.source_org} → {d.target_name || d.target_org}</option>
+            {/each}
+          </select>
+        </label>
+        <button onclick={actions.reverse} disabled={locked || !status.source.org || !status.target.org}>Reverse direction</button>
+      </div>
       <section class="transfer" aria-label="Accounts">
         <div class="account">
           <span class="role">From</span>
@@ -235,6 +310,39 @@
       {#if live}<p class="muted small">{live}</p>{/if}
       {#if error}<p class="error">{error}</p>{/if}
       {#if status.error}<p class="error">{status.error}</p>{/if}
+      {#if status.pull_complete && status.target.org}
+        <div class="panel">
+          <button onclick={actions.preview} disabled={locked}>Preview changes</button>
+          <p class="muted small">Checks target content before copying. Identical content is skipped; different versions stay for review.</p>
+          {#if preview}
+            <p>{preview.new_projects} new project{preview.new_projects === 1 ? '' : 's'} · {preview.new_docs + preview.new_files + preview.new_artifacts + preview.new_chats} new documents/files · {preview.new_skills || 0} new skills · {preview.already_copied} already copied · {preview.conflicts?.length || 0} conflict{preview.conflicts?.length === 1 ? '' : 's'}</p>
+            {#if preview.conflicts?.length}
+              <p class="error">These items will be skipped. Review the source and target, then preview again after resolving the differences.</p>
+              <ul>{#each preview.conflicts as conflict}<li>{conflict}</li>{/each}</ul>
+            {/if}
+            {#each preview.project_links || [] as link}
+              {#if !link.target && preview.target_projects?.length}
+                <label class="mapping">Link “{link.name}” to an existing target project
+                  <select aria-label={`Target project for ${link.name}`} disabled={locked} onchange={(e) => {
+                    const target = e.currentTarget.value;
+                    if (target) run('mapping', async () => { await Go.MapProject(link.source, target); preview = await Go.Preview(); });
+                  }}>
+                    <option value="">Choose a project, or leave unmatched to create one</option>
+                    {#each preview.target_projects as target}<option value={target.uuid}>{target.name} ({target.uuid.slice(0, 8)})</option>{/each}
+                  </select>
+                </label>
+              {/if}
+            {/each}
+            {#if pendingSend}
+              <button class="primary" disabled={locked || !status.copy_reviewed} onclick={pendingSend === 'sync' ? actions.sync_confirmed : actions.push_confirmed}>Send missing items</button>
+            {/if}
+          {/if}
+          {#if status.conflicts?.length && !preview}
+            <p class="error">{status.conflicts.length} conflicts need review.</p>
+            <ul>{#each status.conflicts as conflict}<li>{conflict}</li>{/each}</ul>
+          {/if}
+        </div>
+      {/if}
       {#if notice}<p class="notice">{notice}</p>{/if}
 
       <ol class="steps">
@@ -340,5 +448,18 @@
     <span class="sep" aria-hidden="true"></span>
     <button class="link" onclick={() => openLink('issues')}>Report an issue</button>
     {#if version}<span class="sep" aria-hidden="true"></span><span class="version" title="Include this when you report an issue">{version}</span>{/if}
+    <span class="sep" aria-hidden="true"></span>
+    <button class="link" disabled={checkingUpdate} onclick={() => checkUpdates(true)}>{checkingUpdate ? 'Checking for updates…' : 'Check for updates'}</button>
+    {#if updateMessage}<span role="status">{updateMessage}</span>{/if}
   </footer>
 </div>
+
+<style>
+  .update-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 24px 0; padding: 14px 18px; border: 1px solid var(--rule); border-radius: 12px; background: color-mix(in srgb, var(--brand) 12%, transparent); }
+  .update-banner div { flex: 1; min-width: 200px; }
+  .update-banner p { margin: 4px 0 0; font-size: 13px; color: var(--slate); }
+  .direction-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-bottom: 16px; }
+  .direction-actions label { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 220px; font-size: 13px; color: var(--slate); }
+  .direction-actions select { width: 100%; }
+  .mapping { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+</style>

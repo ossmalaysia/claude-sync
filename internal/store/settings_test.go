@@ -88,6 +88,30 @@ func TestTouchJobKeepsLockFresh(t *testing.T) {
 	}
 }
 
+func TestConcurrentStoresAcquireOnlyOneJob(t *testing.T) {
+	first := open(t)
+	second, err := Open(first.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	results := make(chan func(), 2)
+	for _, s := range []*Store{first, second} {
+		go func(s *Store) { <-start; release, _ := s.AcquireJob("push"); results <- release }(s)
+	}
+	close(start)
+	a, b := <-results, <-results
+	if (a == nil) == (b == nil) {
+		t.Fatal("exactly one process must own the lock")
+	}
+	if a != nil {
+		a()
+	}
+	if b != nil {
+		b()
+	}
+}
+
 func TestSettingsKeepCopyChoices(t *testing.T) {
 	s := open(t)
 	at := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)

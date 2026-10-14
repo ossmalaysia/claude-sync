@@ -148,6 +148,12 @@ func TestPushWithoutProjectsNeedsNoReview(t *testing.T) {
 // Chats are sent only when switched on, and the switch can be changed later.
 func TestChatsFollowWhatToCopy(t *testing.T) {
 	sess := &fakeSession{handle: func(method, path string) (int, string) {
+		if method == "GET" && strings.HasSuffix(path, "/projects/tp1") {
+			return 200, `{"uuid":"tp1"}`
+		}
+		if method == "GET" && (strings.HasSuffix(path, "/tp1/docs") || strings.HasSuffix(path, "/tp1/files")) {
+			return 200, `[]`
+		}
 		if method == "POST" && strings.HasSuffix(path, "/docs") {
 			return 201, `{"uuid":"td"}`
 		}

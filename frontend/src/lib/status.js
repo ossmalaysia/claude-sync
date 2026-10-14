@@ -64,6 +64,7 @@ function selectedTotal(s) {
 }
 
 export function pushLine(s) {
+  if (s.conflicts?.length) return `${plural(s.conflicts.length, 'conflict')} ${s.conflicts.length === 1 ? 'needs' : 'need'} review. Conflicting items are skipped.`;
   const total = selectedTotal(s);
   if (s.job === 'push') return `Sending… ${s.pushed} of ${total} projects created`;
   if (!s.projects && !s.pushed) return 'Pull first.';
@@ -111,6 +112,8 @@ export function nextButton(s) {
       return { action: 'verify', label: 'Verify target' };
     case 'memory':
       return { action: 'memory', label: 'Send memory to target' };
+    case 'conflicts':
+      return { action: 'preview', label: 'Review sync conflicts' };
     case 'review':
       if (s.verify_waiting && s.verify_waiting === s.verify_total - s.verify_ok)
         return { action: 'select', label: 'Choose projects to send the remaining artifacts' };

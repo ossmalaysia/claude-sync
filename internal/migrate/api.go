@@ -33,7 +33,7 @@ type API interface {
 }
 
 var (
-	ErrOrgMismatch = errors.New("state.json belongs to a different target org; move it aside to start a new migration")
+	ErrOrgMismatch = errors.New("this history belongs to a different target organization; select the matching saved direction or a separate data folder")
 	ErrAuthPaused  = errors.New("session expired: log in again in the target browser, then resume")
 )
 

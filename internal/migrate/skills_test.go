@@ -44,7 +44,7 @@ func TestPushUploadsSkillsOnceAndAdoptsSameName(t *testing.T) {
 	st.SaveSkill(store.SkillMeta{ID: "skill_q", Name: "quotation", UpdatedAt: "t1"}, []byte("PK-q"))
 	st.SaveSkill(store.SkillMeta{ID: "skill_i", Name: "invoice", UpdatedAt: "t1"}, []byte("PK-i"))
 	target := newFakeAPI()
-	target.addSkill("invoice", "custom", "user", "t", []byte("already there")) // e.g. uploaded by hand
+	target.addSkill("invoice", "custom", "user", "t", []byte("PK-i")) // same package uploaded by hand
 	state, _ := st.LoadState()
 
 	res, err := Push(context.Background(), target, st, state, "org", map[string]bool{}, testOpts(), nil)
@@ -118,5 +118,21 @@ func TestPushAndPlanLeaveSkillsOutWhenSwitchedOff(t *testing.T) {
 	res, err := Push(context.Background(), target, st, state, "org", map[string]bool{}, testOpts(), nil)
 	if err != nil || res.Skills != 0 || target.count("UploadSkill") != 0 || target.count("ListSkills") != 0 {
 		t.Fatalf("res=%+v err=%v uploads=%d", res, err, target.count("UploadSkill"))
+	}
+}
+
+func TestSkillWithDifferentContentsIsConflict(t *testing.T) {
+	st := newTestStore(t)
+	st.SaveSkill(store.SkillMeta{ID: "src", Name: "quote"}, []byte("new"))
+	api := newFakeAPI()
+	api.addSkill("quote", "custom", "user", "t", []byte("old"))
+	state := &store.State{}
+	plan, err := Preview(context.Background(), api, st, state, "org", nil, testOpts())
+	if err != nil || len(plan.Conflicts) != 1 || plan.NewSkills != 0 {
+		t.Fatalf("plan=%+v err=%v", plan, err)
+	}
+	res, err := Push(context.Background(), api, st, state, "org", nil, testOpts(), nil)
+	if err != nil || res.Skills != 0 || len(res.Conflicts) != 1 || api.count("UploadSkill") != 0 {
+		t.Fatalf("res=%+v err=%v", res, err)
 	}
 }

@@ -98,6 +98,13 @@ func Verify(ctx context.Context, api API, st *store.Store, state *store.State, o
 			wantChats = countDone(ps.Chats) // sent before the user switched chats off
 		}
 		row.WantDocs += wantChats
+		if ps != nil {
+			for _, it := range ps.Docs {
+				if it != nil && it.OriginExport && it.Status == store.StatusDone {
+					row.WantDocs--
+				}
+			}
+		}
 		if !pushed {
 			row.Error = "project not created in target"
 			if ps != nil && ps.Error != "" {
@@ -119,6 +126,10 @@ func Verify(ctx context.Context, api API, st *store.Store, state *store.State, o
 		default:
 			row.GotDocs, row.GotFiles = got.DocsCount, got.FilesCount
 			row.OK = row.GotDocs == row.WantDocs && row.GotFiles == row.WantFiles
+			if conflicts := projectConflicts(p, ps); len(conflicts) > 0 {
+				row.OK = false
+				row.Error = fmt.Sprintf("%d content conflicts need review", len(conflicts))
+			}
 			// If the only difference is artifacts not sent yet, say so.
 			unsentArts := wantArts - countDone(ps.Artifacts)
 			unsent := unsentArts + wantChats - countDone(ps.Chats)

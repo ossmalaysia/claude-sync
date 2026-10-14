@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -91,16 +92,32 @@ var ErrJobRunning = errors.New("another pull or push is already running (in this
 // A job lock older than this without a touch is treated as left over from a crash.
 const jobStaleAfter = 5 * time.Minute
 
-func (s *Store) jobPath() string { return s.path("job.lock") }
+func (s *Store) jobPath() string { return filepath.Join(s.root, "migration", "job.lock") }
 
 // AcquireJob takes the single job lock for kind ("pull" or "push"). The lock
 // is a file so the app and the CLI exclude each other. Callers must call
 // TouchJob regularly while working and release when done.
 func (s *Store) AcquireJob(kind string) (release func(), err error) {
-	if running := s.RunningJob(); running != "" {
+	path := s.jobPath()
+	if fi, err := os.Stat(path); err == nil && time.Since(fi.ModTime()) > jobStaleAfter {
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- fixed migration/job.lock under the configured local data root
+	if errors.Is(err, fs.ErrExist) {
 		return nil, ErrJobRunning
 	}
-	if err := WriteFileAtomic(s.jobPath(), []byte(kind)); err != nil {
+	if err != nil {
+		return nil, err
+	}
+	_, err = f.WriteString(kind)
+	closeErr := f.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		_ = os.Remove(path)
 		return nil, err
 	}
 	return func() { _ = os.Remove(s.jobPath()) }, nil // best effort: a stale lock expires anyway

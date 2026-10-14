@@ -60,6 +60,8 @@ Stored in `~/Library/Application Support/claude-sync/` (macOS) or
 
 ```
 profiles/source, profiles/target   browser profiles (saved logins)
+directions.json   saved org pairs, active direction and browser-role orientation
+directions/<pair-hash>/migration/  isolated data for additional directions
 migration/
   manifest.json    pull progress: total, complete, counts
   projects/<id>/   project.json, docs/<id>.json, files/<id>.bin + .json

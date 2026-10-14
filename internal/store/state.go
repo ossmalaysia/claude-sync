@@ -10,20 +10,23 @@ import (
 )
 
 const (
-	StatusDone    = "done"
-	StatusFailed  = "failed"
-	StatusSkipped = "skipped"
+	StatusDone     = "done"
+	StatusFailed   = "failed"
+	StatusSkipped  = "skipped"
+	StatusConflict = "conflict"
 )
 
 var ErrCorruptState = errors.New("state.json is corrupt")
 
 // ItemState tracks one pushed item (instructions, a doc or a file).
 type ItemState struct {
-	Status   string `json:"status"`
-	Target   string `json:"target,omitempty"`
-	SHA      string `json:"sha,omitempty"` // content hash at push time (docs, instructions)
-	Error    string `json:"error,omitempty"`
-	Attempts int    `json:"attempts,omitempty"`
+	Status       string `json:"status"`
+	Target       string `json:"target,omitempty"`
+	SHA          string `json:"sha,omitempty"`           // content hash at push time (docs, instructions)
+	OriginExport bool   `json:"origin_export,omitempty"` // reverse of a chat/artifact doc; original is already present as a chat
+	Name         string `json:"name,omitempty"`
+	Error        string `json:"error,omitempty"`
+	Attempts     int    `json:"attempts,omitempty"`
 }
 
 type ProjectState struct {

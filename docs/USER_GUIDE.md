@@ -1,5 +1,48 @@
 # Claude Sync user guide
 
+## Checking for updates
+
+The app checks public GitHub releases at startup and every six hours while open.
+When a newer version is available, **View update** opens its official release page.
+**Later** hides that version's banner for this session. **Check for updates** in
+the footer checks immediately and reports whether you are up to date or offline.
+
+Finish a running sync and close the app before installing the Windows update or
+replacing the macOS application. Saved logins, profiles and transfer histories
+remain in the app's data folder. Early test releases with numeric version tags
+are included; draft releases and development/RC tags are not offered.
+
+Older builds do not contain an update checker: download this release manually
+once to start receiving notifications for future versions.
+
+## Reversing a transfer
+
+Choose **Reverse direction** on the home screen to swap the accounts and reuse
+the opposite saved login. Each organization pair has its own download folder,
+project selection, copy choices and progress. **Saved direction** switches back
+to an earlier transfer without clearing its history. Existing migration files
+are preserved in their original folder.
+
+Download the new source and review **What to copy**. **Preview changes** reads
+the target without sending anything. Start/Resume push and **Scan & sync changes**
+also open a preview; click **Send missing items** after reviewing it.
+
+The preview shows new projects, missing documents/files, content already copied
+and conflicts. Saved project and file IDs are reused in reverse, so renaming
+does not break their links. Without a saved mapping, a unique project name can
+be reused; identical document/file content is checked before skipping it.
+For ambiguous or renamed projects with no history, select the existing target
+project in the preview's link dropdown.
+
+Different instructions, documents, files or skill packages are flagged as
+conflicts and skipped. Review both accounts, resolve the differences manually,
+and preview again. The app does not overwrite existing versions or propagate
+deletions. Keep the local data folder: it contains the ID mappings and histories.
+
+Content checks may download target files again. This is expected and does not
+upload another copy. Transfers made before the app recorded item IDs rely on
+content matching; overwritten or missing old history cannot be reconstructed.
+
 Claude Sync copies your claude.ai Projects, the artifacts from your chats, your
 own skills, and your memory from one account to another, and can copy your chats
 as documents. For example, from a personal account to your company's team

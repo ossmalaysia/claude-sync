@@ -59,6 +59,12 @@ func (r *pushRun) pushSkills() error {
 	if err != nil || settings.SkipSkills {
 		return err
 	}
+	if err := r.reconcileSkills(); err != nil {
+		return err
+	}
+	if err := r.save(); err != nil {
+		return err
+	}
 	skills, err := r.st.ListSkills()
 	if err != nil || len(skills) == 0 {
 		return err
@@ -68,6 +74,10 @@ func (r *pushRun) pushSkills() error {
 	}
 	var pending []store.SkillMeta
 	for _, sk := range skills {
+		if it := r.state.Skills[sk.ID]; it != nil && it.Status == store.StatusConflict {
+			r.res.Conflicts = append(r.res.Conflicts, "Skills: "+sk.Name+": "+it.Error)
+			continue
+		}
 		if it := r.state.Skills[sk.ID]; it == nil || it.Status != store.StatusDone {
 			pending = append(pending, sk)
 		}
@@ -97,7 +107,8 @@ func (r *pushRun) pushSkills() error {
 			r.state.Skills[sk.ID] = it
 		}
 		if have[sk.Name] {
-			it.Status, it.Error = store.StatusDone, ""
+			conflict(it, "target skill name is already in use")
+			r.res.Conflicts = append(r.res.Conflicts, "Skills: "+sk.Name+": "+it.Error)
 			if err := r.save(); err != nil {
 				return err
 			}
@@ -113,12 +124,16 @@ func (r *pushRun) pushSkills() error {
 			continue
 		}
 		name := sk.Name
+		sha, err := skillSHA(pkg)
+		if err != nil {
+			return err
+		}
 		retry := false
-		if err := r.item("skill "+name, it, "", func() (string, error) {
+		if err := r.item("skill "+name, it, sha, func() (string, error) {
 			// An upload can take effect even when its reply is lost, and a
 			// second upload of the same name is refused: look before retrying.
 			if retry {
-				if there, err := r.targetHasSkill(name); err != nil || there {
+				if there, err := r.targetHasSkill(name, sha); err != nil || there {
 					return "", err
 				}
 			}
@@ -135,13 +150,24 @@ func (r *pushRun) pushSkills() error {
 	return nil
 }
 
-func (r *pushRun) targetHasSkill(name string) (bool, error) {
+func (r *pushRun) targetHasSkill(name, sha string) (bool, error) {
 	skills, err := r.api.ListSkills(r.ctx, r.org)
 	if err != nil {
 		return false, err
 	}
 	for _, s := range skills {
 		if s.Name == name {
+			pkg, err := r.api.DownloadSkill(r.ctx, r.org, s.ID)
+			if err != nil {
+				return false, err
+			}
+			remoteSHA, err := skillSHA(pkg)
+			if err != nil {
+				return false, err
+			}
+			if remoteSHA != sha {
+				return false, fmt.Errorf("target skill contents differ")
+			}
 			return true, nil
 		}
 	}

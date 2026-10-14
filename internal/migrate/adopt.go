@@ -11,8 +11,7 @@ import (
 var errStopProject = errors.New("project skipped")
 
 // existingProject returns a target project with this name that no source
-// project is mapped to yet, or "". Same-named source projects each claim a
-// different target project, in listing order.
+// project is mapped to yet, or "". Ambiguous names require an explicit mapping.
 func (r *pushRun) existingProject(name string) (string, error) {
 	if r.unclaimed == nil {
 		projects, _, err := withRetry(r.ctx, r.opts, func() ([]claudeapi.Project, error) { return r.api.ListProjects(r.ctx, r.org) })
@@ -33,6 +32,9 @@ func (r *pushRun) existingProject(name string) (string, error) {
 		}
 	}
 	ids := r.unclaimed[name]
+	if len(ids) > 1 {
+		return "", &ambiguousProject{name: name}
+	}
 	if len(ids) == 0 {
 		return "", nil
 	}
@@ -40,61 +42,28 @@ func (r *pushRun) existingProject(name string) (string, error) {
 	return ids[0], nil
 }
 
-// adoptItems marks the local docs, files, artifacts and instructions that an
-// adopted target project already has as sent, matching by file name, so only
-// what is missing gets sent. Existing instructions are never overwritten.
+// adoptItems verifies content before recording an existing copy.
 func (r *pushRun) adoptItems(p store.ProjectMeta, ps *store.ProjectState) error {
-	target, _, err := withRetry(r.ctx, r.opts, func() (claudeapi.Project, error) { return r.api.GetProject(r.ctx, r.org, ps.Target) })
-	if err != nil {
-		return r.adoptFailed(ps, err)
-	}
-	docs, _, err := withRetry(r.ctx, r.opts, func() ([]claudeapi.Doc, error) { return r.api.ListDocs(r.ctx, r.org, ps.Target) })
-	if err != nil {
-		return r.adoptFailed(ps, err)
-	}
-	files, _, err := withRetry(r.ctx, r.opts, func() ([]claudeapi.File, error) { return r.api.ListFiles(r.ctx, r.org, ps.Target) })
-	if err != nil {
-		return r.adoptFailed(ps, err)
-	}
-	docNames, fileNames := map[string]int{}, map[string]int{}
-	for _, d := range docs {
-		docNames[d.FileName]++
-	}
-	for _, f := range files {
-		fileNames[f.FileName]++
-	}
-	have := func(names map[string]int, name string, items map[string]*store.ItemState, key string) {
-		if it := items[key]; (it != nil && it.Status == store.StatusDone) || names[name] == 0 {
-			return
+	before := 0
+	for _, items := range []map[string]*store.ItemState{ps.Docs, ps.Files, ps.Artifacts, ps.Chats} {
+		for _, it := range items {
+			if it != nil && it.Status == store.StatusDone {
+				before++
+			}
 		}
-		names[name]--
-		items[key] = &store.ItemState{Status: store.StatusDone}
-		r.res.AlreadyThere++
 	}
-
-	if p.PromptTemplate != "" && target.PromptTemplate != "" {
-		ps.Instructions = &store.ItemState{Status: store.StatusDone}
+	if err := r.reconcileItems(p, ps); err != nil {
+		return r.adoptFailed(ps, err)
 	}
-	local, err := r.st.ListDocs(p.UUID)
-	if err != nil {
-		return err
+	after := 0
+	for _, items := range []map[string]*store.ItemState{ps.Docs, ps.Files, ps.Artifacts, ps.Chats} {
+		for _, it := range items {
+			if it != nil && it.Status == store.StatusDone {
+				after++
+			}
+		}
 	}
-	for _, d := range local {
-		have(docNames, d.FileName, ps.Docs, d.UUID)
-	}
-	for _, a := range r.arts[p.UUID] {
-		have(docNames, a.FileName, ps.Artifacts, a.key())
-	}
-	for _, c := range r.chats[p.UUID] {
-		have(docNames, c.TranscriptAs, ps.Chats, c.UUID)
-	}
-	localFiles, err := r.st.ListFiles(p.UUID)
-	if err != nil {
-		return err
-	}
-	for _, f := range localFiles {
-		have(fileNames, f.FileName, ps.Files, f.UUID)
-	}
+	r.res.AlreadyThere += after - before
 	return r.save()
 }
 

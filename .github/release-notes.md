@@ -1,13 +1,16 @@
 Claude Sync: copy your claude.ai Projects, artifacts, personal skills and memory from one account to another (for example, personal to your team account).
 
-## New in v0.1.4
+## New in v0.1.5
 
-- **Copy chats outside projects:** choose **Yes** under **What to copy** to send each conversation as a Markdown document into one new private project, named **Previous Project** by default.
-- **Choose the project name:** edit it in Settings before creation. After creation, rename it in claude.ai; future syncs keep using the same project.
-- **Resume and sync:** interrupted uploads resume from saved progress, and newly discovered chats are added on later syncs. Generated artifacts follow the artifacts switch. An unrelated same-name project is left untouched.
-- **Verification and error handling:** turning the option off stops uploads without hiding verification of the created project. Corrupt migration state is reported without preventing the home screen from loading.
+- **Saved directions and reverse:** switch between organization pairs with separate downloads, project selections and copy histories. Reverse direction reuses the opposite login and saved project/file IDs, including renamed projects.
+- **Content-checked preview:** inspect missing documents/files before sending. Identical contents are skipped; different versions are flagged for manual review. Link ambiguous or renamed projects to an existing target in the preview.
+- **Safer resume:** interrupted writes check whether the content already arrived before retrying. Concurrent app/CLI jobs share an exclusive lock.
+- **Update notifications:** startup and periodic checks find newer published releases, with a manual **Check for updates** button and a dismissible banner opening the official release page. Installation is user-initiated and does not replace a running app.
+- **Security maintenance:** builds use Go 1.26.9 and a patched frontend source-map dependency.
 
-Full [changelog](https://github.com/ossmalaysia/claude-sync/blob/v0.1.4/CHANGELOG.md).
+**Updating from v0.1.4 or earlier:** download this release manually once. Older builds do not have the checker. Finish any sync and close the app before installing; existing local history and saved logins are preserved. Lost history from an older transfer may require content matching or manual project linking.
+
+Full [changelog](https://github.com/ossmalaysia/claude-sync/blob/v0.1.5/CHANGELOG.md).
 
 **This is an early test version.** Please [report anything odd](https://github.com/ossmalaysia/claude-sync/issues/new/choose); the app's version is shown at the bottom of its window.
 

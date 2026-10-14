@@ -8,22 +8,37 @@ type SkippedFile struct {
 	SizeBytes int64  `json:"size_bytes"`
 }
 
+type ProjectLink struct {
+	Source string `json:"source"`
+	Name   string `json:"name"`
+	Target string `json:"target"`
+}
+
+type TargetProject struct {
+	UUID string `json:"uuid"`
+	Name string `json:"name"`
+}
+
 // PlanResult is what Push would do, computed without any network calls.
 type PlanResult struct {
-	TargetOrg        string        `json:"target_org"`
-	SelectedProjects int           `json:"selected_projects"`
-	NewProjects      int           `json:"new_projects"`
-	NewInstructions  int           `json:"new_instructions"`
-	NewDocs          int           `json:"new_docs"`
-	NewFiles         int           `json:"new_files"`
-	NewArtifacts     int           `json:"new_artifacts"`
-	NewChats         int           `json:"new_chats"` // chat transcripts, when chosen
-	NewSkills        int           `json:"new_skills"`
-	NewBytes         int64         `json:"new_bytes"`
-	RetryFailed      int           `json:"retry_failed"`
-	AlreadyDone      int           `json:"already_done"`
-	Skipped          []SkippedFile `json:"skipped"`
-	Changed          []string      `json:"changed"` // changed in source after push; not synced in v1
+	TargetOrg        string          `json:"target_org"`
+	SelectedProjects int             `json:"selected_projects"`
+	NewProjects      int             `json:"new_projects"`
+	NewInstructions  int             `json:"new_instructions"`
+	NewDocs          int             `json:"new_docs"`
+	NewFiles         int             `json:"new_files"`
+	NewArtifacts     int             `json:"new_artifacts"`
+	NewChats         int             `json:"new_chats"` // chat transcripts, when chosen
+	NewSkills        int             `json:"new_skills"`
+	NewBytes         int64           `json:"new_bytes"`
+	RetryFailed      int             `json:"retry_failed"`
+	AlreadyDone      int             `json:"already_done"`
+	AlreadyCopied    int             `json:"already_copied"`
+	Conflicts        []string        `json:"conflicts"`
+	ProjectLinks     []ProjectLink   `json:"project_links"`
+	TargetProjects   []TargetProject `json:"target_projects"`
+	Skipped          []SkippedFile   `json:"skipped"`
+	Changed          []string        `json:"changed"` // changed in source after push; not synced in v1
 }
 
 func itemOf(m map[string]*store.ItemState, id string) *store.ItemState {
@@ -61,9 +76,26 @@ func Plan(st *store.Store, sel map[string]bool, state *store.State, org string, 
 		}
 		res.SelectedProjects++
 		ps := state.Projects[p.UUID]
+		res.Conflicts = append(res.Conflicts, projectConflicts(p, ps)...)
+		if ps != nil && ps.Status == store.StatusConflict {
+			continue
+		}
+		if ps != nil {
+			for _, items := range []map[string]*store.ItemState{ps.Docs, ps.Files, ps.Artifacts, ps.Chats} {
+				for _, it := range items {
+					if it != nil && it.Status == store.StatusDone {
+						res.AlreadyCopied++
+					}
+				}
+			}
+		}
 		var docsState, filesState, artsState map[string]*store.ItemState
 		var instr *store.ItemState
 		pending := false
+		if ps != nil && ps.Target != "" && ps.Status == store.StatusFailed {
+			res.RetryFailed++
+			pending = true
+		}
 		if ps == nil || ps.Target == "" {
 			res.NewProjects++
 			pending = true
@@ -162,6 +194,10 @@ func Plan(st *store.Store, sel map[string]bool, state *store.State, org string, 
 	}
 	for _, sk := range skills {
 		switch it := itemOf(state.Skills, sk.ID); {
+		case it != nil && it.Status == store.StatusConflict:
+			res.Conflicts = append(res.Conflicts, "Skills: "+sk.Name+": "+it.Error)
+		case it != nil && it.Status == store.StatusDone:
+			res.AlreadyCopied++
 		case it == nil || it.Status == "":
 			res.NewSkills++
 		case it.Status == store.StatusFailed:

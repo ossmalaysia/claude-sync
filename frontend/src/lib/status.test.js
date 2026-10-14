@@ -13,6 +13,11 @@ const base = {
 };
 const s = (over) => ({ ...base, ...over });
 
+it('shows conflicts instead of claiming everything was sent', () => {
+  expect(pushLine(s({ pending_projects: 0, pending_items: 0, conflicts: ['notes changed'] }))).toContain('Conflicting items are skipped');
+  expect(nextButton(s({ next: 'conflicts' }))).toEqual({ action: 'preview', label: 'Review sync conflicts' });
+});
+
 describe('pullLine', () => {
   it('not pulled', () => expect(pullLine(s({ pull_total: 0, pull_done: 0, pull_complete: false, pulled_at: '' }))).toBe('Not pulled yet'));
   it('partial', () => expect(pullLine(s({ pull_done: 80, pull_complete: false }))).toBe('80 of 172 projects downloaded. Stopped, you can resume.'));

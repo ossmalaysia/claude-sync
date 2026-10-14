@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,7 +32,7 @@ type Emitter func(ctx context.Context, event string, data any)
 
 // Version is shown in the app. Release builds set it from the git tag:
 // -ldflags "-X github.com/ossmalaysia/claude-sync/internal/app.Version=v0.1.0".
-var Version = "v0.1.4-dev"
+var Version = "v0.1.5-dev"
 
 // Version reports the build's version for display.
 func (a *App) Version() string { return Version }
@@ -46,9 +47,13 @@ type App struct {
 	openPath     func(path string) error // opens a folder in Finder / Explorer
 	openURL      func(url string) error  // opens a web page in the default browser
 
-	mu        sync.Mutex
-	sessions  map[string]Session
-	jobCancel context.CancelFunc // non-nil while a pull or push runs in this app
+	mu              sync.Mutex
+	sessions        map[string]Session
+	jobCancel       context.CancelFunc // non-nil while a pull or push runs in this app
+	updateMu        sync.Mutex
+	updateClient    *http.Client
+	updateInfo      UpdateInfo
+	updateCheckedAt time.Time
 }
 
 func New(st *store.Store, open Opener, emit Emitter) *App {
@@ -58,6 +63,9 @@ func New(st *store.Store, open Opener, emit Emitter) *App {
 		sessions: map[string]Session{},
 		openPath: openInFileManager,
 		openURL:  openInBrowser,
+		updateClient: &http.Client{Timeout: 8 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return fmt.Errorf("unexpected update API redirect")
+		}},
 	}
 }
 
@@ -77,6 +85,7 @@ var links = map[string]string{
 	"website":  "https://www.anchorsprint.com/",
 	"issues":   "https://github.com/ossmalaysia/claude-sync/issues/new/choose",
 	"projects": "https://claude.ai/projects",
+	"releases": "https://github.com/ossmalaysia/claude-sync/releases",
 }
 
 // OpenLink opens one of the app's own web pages in the default browser.
@@ -100,7 +109,7 @@ func openInBrowser(u string) error {
 
 // OpenArtifactsFolder shows the readable copies of recovered artifacts.
 func (a *App) OpenArtifactsFolder() error {
-	dir := filepath.Join(a.st.Root(), "migration", "artifacts-export")
+	dir := filepath.Join(a.st.DataDir(), "artifacts-export")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -285,10 +294,25 @@ func (a *App) SetOrg(account, uuid, name string) error {
 	if err != nil {
 		return err
 	}
+	cur, _ := a.orgOf(account)
+	if cur == uuid {
+		if account == "source" {
+			st.SourceOrg, st.SourceOrgName = uuid, name
+		} else {
+			st.TargetOrg, st.TargetOrgName = uuid, name
+		}
+		return a.st.SaveSettings(st)
+	}
+	if a.st.RunningJob() != "" {
+		return store.ErrJobRunning
+	}
 	if account == "source" {
 		st.SourceOrg, st.SourceOrgName = uuid, name
 	} else {
 		st.TargetOrg, st.TargetOrgName = uuid, name
+	}
+	if st.SourceOrg != "" && st.TargetOrg != "" {
+		return a.st.ActivateDirection(st.SourceOrg, st.TargetOrg, st.SourceOrgName, st.TargetOrgName, a.st.Reversed())
 	}
 	return a.st.SaveSettings(st)
 }
@@ -589,6 +613,7 @@ type AccountStatus struct {
 // Status is everything the home screen shows, rebuilt from the files on
 // disk, so it is correct after a restart and when the CLI did the work.
 type Status struct {
+	Conflicts       []string      `json:"conflicts"`
 	UnassignedChats bool          `json:"unassigned_chats"`
 	Source          AccountStatus `json:"source"`
 	Target          AccountStatus `json:"target"`
@@ -685,6 +710,8 @@ func nextAction(s Status) string {
 		return "connect_target"
 	case s.PendingProjects+s.PendingItems+s.Failed > 0:
 		return "push"
+	case len(s.Conflicts) > 0:
+		return "conflicts"
 	case s.VerifiedAt == "" || s.VerifyStale:
 		return "verify"
 	case s.VerifyOK < s.VerifyTotal:
@@ -781,6 +808,7 @@ func (a *App) Status() (Status, error) {
 		if err != nil {
 			s.Error = err.Error()
 		} else {
+			s.Conflicts = plan.Conflicts
 			s.PendingProjects = plan.NewProjects
 			s.PendingItems = plan.NewInstructions + plan.NewDocs + plan.NewFiles + plan.NewArtifacts + plan.NewChats
 			s.ArtifactsPending = plan.NewArtifacts

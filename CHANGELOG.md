@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.5 (2026-10-14)
+
+- Saved sync directions with isolated downloads, selections and progress; reverse direction reuses opposite browser logins and inverts saved project/document/file mappings.
+- Content-checked previews before sending, with manual project linking for renamed or ambiguous projects. Identical content is reused; different versions are reported as conflicts and skipped.
+- File hashes and skill package content hashes track copies across directions. Concurrent app/CLI jobs share an exclusive lock.
+- Update checks at startup and every six hours, a manual Check for updates button, and a dismissible notification linking to the official newer release. Offline/rate-limit failures do not interrupt syncs.
+- Build with Go 1.26.9 and patch the frontend source-map dependency for current security fixes.
+
 ## 0.1.4 (2026-10-04)
 
 - Chats outside projects (opt-in): choose Yes under What to copy to copy these conversations as Markdown documents into one new private target project. The default name is Previous Project; change it in Settings before creation. Generated artifacts follow the artifacts switch.

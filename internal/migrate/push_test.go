@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,8 +77,10 @@ func TestPushIsIdempotent(t *testing.T) {
 	if err != nil || res.CreatedProjects != 0 || res.Docs != 0 || res.Files != 0 {
 		t.Fatalf("second run res=%+v err=%v", res, err)
 	}
-	if len(api.calls) != before {
-		t.Fatalf("second run made API calls: %v", api.calls[before:])
+	for _, call := range api.calls[before:] {
+		if strings.HasPrefix(call, "Create") || strings.HasPrefix(call, "Upload") || strings.HasPrefix(call, "Set") {
+			t.Fatalf("second run wrote: %v", api.calls[before:])
+		}
 	}
 }
 
@@ -320,7 +323,13 @@ func TestPushAddOnlyResyncPicksUpOnlyNewItems(t *testing.T) {
 		t.Fatalf("res=%+v", res)
 	}
 	calls := api.calls[before:]
-	if len(calls) != 2 || calls[0] != "CreateDoc:new.md" || calls[1] != "UploadFile:new.pdf" {
+	writes := []string{}
+	for _, call := range calls {
+		if strings.HasPrefix(call, "Create") || strings.HasPrefix(call, "Upload") || strings.HasPrefix(call, "Set") {
+			writes = append(writes, call)
+		}
+	}
+	if len(writes) != 2 || writes[0] != "CreateDoc:new.md" || writes[1] != "UploadFile:new.pdf" {
 		t.Fatalf("re-sync calls=%v", calls)
 	}
 }
@@ -357,7 +366,7 @@ func TestPushAddsProjectArtifactsAsDocs(t *testing.T) {
 		t.Fatalf("artifact state=%+v", it)
 	}
 	before := len(api.calls)
-	if res, err := push(t, api, st, state, sel, testOpts()); err != nil || res.Artifacts != 0 || len(api.calls) != before {
+	if res, err := push(t, api, st, state, sel, testOpts()); err != nil || res.Artifacts != 0 || res.Docs != 0 || res.Files != 0 || res.CreatedProjects != 0 {
 		t.Fatalf("second push res=%+v err=%v extra calls=%v", res, err, api.calls[before:])
 	}
 }
@@ -379,6 +388,10 @@ func TestPushAddsNewArtifactsToAlreadyPushedProject(t *testing.T) {
 // computer already sent instead of creating everything again.
 func TestPushFromAnotherComputerAdoptsWhatIsAlreadyInTheTarget(t *testing.T) {
 	api, st, state, sel := pushFixture(t)
+	p2, _, _ := st.LoadProject("s2")
+	p2.Name = "Different project"
+	st.SaveProject(p2)
+
 	seedChat(t, st, "chat1", "s1", store.ArtifactRecord{ID: "artifact:a", FileName: "Artifact - a.md", Content: "a"})
 	if _, err := push(t, api, st, state, sel, testOpts()); err != nil {
 		t.Fatal(err)
@@ -402,7 +415,7 @@ func TestPushFromAnotherComputerAdoptsWhatIsAlreadyInTheTarget(t *testing.T) {
 	if api.count("CreateDoc") != docs+1 || res.Docs != 1 || res.Artifacts != 0 {
 		t.Fatalf("want only the new doc sent: CreateDoc %d->%d res=%+v", docs, api.count("CreateDoc"), res)
 	}
-	// Both same-named source projects map to different target projects.
+	// Both source projects retain their separate target IDs.
 	if fresh.Projects["s1"].Target == "" || fresh.Projects["s1"].Target == fresh.Projects["s2"].Target {
 		t.Fatalf("targets=%q %q", fresh.Projects["s1"].Target, fresh.Projects["s2"].Target)
 	}
@@ -422,6 +435,10 @@ func TestPushCreatesProjectsTheTargetDoesNotHave(t *testing.T) {
 // duplicated.
 func TestPushSkipsAdoptedProjectItCannotRead(t *testing.T) {
 	api, st, state, sel := pushFixture(t)
+	p2, _, _ := st.LoadProject("s2")
+	p2.Name = "Different project"
+	st.SaveProject(p2)
+
 	push(t, api, st, state, sel, testOpts())
 	before := api.count("CreateProject") + api.count("CreateDoc")
 	api.failNext("ListDocs", httpErr(400, nil))

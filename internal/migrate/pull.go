@@ -50,6 +50,9 @@ func mimeFor(name string) string {
 // are not downloaded again.
 func Pull(ctx context.Context, api API, st *store.Store, org string, opts Options, report Reporter) (PullResult, error) {
 	var res PullResult
+	if saved, err := st.LoadManifest(); err == nil && saved.SourceOrg != "" && saved.SourceOrg != org {
+		return res, fmt.Errorf("local download belongs to a different source organization; select a saved direction or a separate data folder")
+	}
 	projects, _, err := withRetry(ctx, opts, func() ([]claudeapi.Project, error) { return api.ListProjects(ctx, org) })
 	if err != nil {
 		return res, fmt.Errorf("list projects: %w", err)

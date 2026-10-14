@@ -22,7 +22,10 @@ We aim to respond within 7 days.
   DevTools commands on a random local port (127.0.0.1). Other programs running
   as your user could in principle attach to it; close Claude Sync when you are
   not using it.
-- Claude Sync talks only to claude.ai. It has no server and sends no telemetry.
+- Sync data is sent only to claude.ai. Update checks read public release metadata
+  from api.github.com with no authentication or Claude account data. Update links
+  open the repository's GitHub release page; the app never silently installs code.
+  It has no server and sends no telemetry.
 
 ## Checks run before each release
 
