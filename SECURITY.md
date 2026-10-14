@@ -14,8 +14,8 @@ We aim to respond within 7 days.
   (`profiles/` in the data folder). Anyone with access to that folder can use
   those sessions, so protect it like any browser profile. Delete it to log out.
 - Downloaded projects, documents and files are stored unencrypted in the data
-  folder on your computer. Delete the `migration/` folder when you no longer
-  need the copy.
+  folder on your computer. Delete `migration/` and `directions/` when you no
+  longer need the copies or transfer histories.
 - The data folder is created readable only by your user account (0700), since
   file and folder names include project, chat and artifact titles.
 - While a pull or push runs, the Chrome/Edge window it controls listens for

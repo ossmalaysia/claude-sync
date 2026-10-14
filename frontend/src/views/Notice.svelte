@@ -37,8 +37,9 @@
 
     <dt>Your data</dt>
     <dd>
-      Everything stays on this computer. Claude Sync talks only to claude.ai, through a browser window where you sign
-      in yourself. It never sees your password.
+      Downloads and saved logins stay on this computer. Sync connects to claude.ai through a browser window where
+      you sign in yourself; the app never sees your password. Update checks read public GitHub release metadata
+      without sending your Claude account details or downloaded content.
     </dd>
 
     <dt>Not an Anthropic product</dt>
